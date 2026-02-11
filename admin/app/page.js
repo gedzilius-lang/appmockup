@@ -14,6 +14,7 @@ export default function Admin() {
   const [venueName, setVenueName] = useState("Zurich Demo Venue");
   const [venuePin, setVenuePin] = useState("1234");
   const [venues, setVenues] = useState([]);
+  const [analytics, setAnalytics] = useState(null);
 
   const [eventTitle, setEventTitle] = useState("Demo Night");
   const [eventVenue, setEventVenue] = useState("Zurich Demo Venue");

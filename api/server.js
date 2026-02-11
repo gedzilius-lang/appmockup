@@ -61,6 +61,24 @@ async function initDb() {
       payload jsonb not null,
       created_at timestamptz not null default now()
     );
+
+    create table if not exists venue_sessions (
+      id serial primary key,
+      venue_id int not null references venues(id),
+      user_id int not null references users(id),
+      uid_tag text,
+      started_at timestamptz not null default now(),
+      ended_at timestamptz
+    );
+
+    create table if not exists analytics_events (
+      id serial primary key,
+      name text not null,
+      venue_id int references venues(id),
+      user_id int references users(id),
+      payload jsonb not null default {}::jsonb,
+      created_at timestamptz not null default now()
+    );
   `);
 
   // Seed main admin once

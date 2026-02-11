@@ -12,8 +12,16 @@ export default async function Home() {
   const events = await getEvents();
   return (
     <main>
-      <h1 style={{marginTop:0}}>Tonight / Upcoming — Zurich</h1>
-      <p style={{opacity:.8}}>Curated feed. OS mode lives inside venues.</p>
+      <h1 style={{marginTop:0}}>PeopleWeLike • Zurich</h1>
+      <p style={{opacity:.8}}>Nightlife feed + venue OS demo. NFC later. Points now.</p>
+
+      <div style={{border:"1px solid #ddd", borderRadius:12, padding:12, marginBottom:14}}>
+        <h2 style={{marginTop:0}}>Guest check-in (Phase 1.2)</h2>
+        <p style={{opacity:.8, marginTop:6}}>Select venue, optional UID (simulates NFC tag UID), check-in → points + session.</p>
+        <a href="/guest" style={{fontWeight:800}}>Open Guest Panel</a>
+      </div>
+
+      <h2>Tonight / Upcoming</h2>
       <div style={{display:"grid", gap:12}}>
         {events.map(e => (
           <a key={e.id} href={`/event/${e.id}`} style={{border:"1px solid #ddd", borderRadius:12, padding:12, textDecoration:"none", color:"inherit"}}>
