@@ -1,0 +1,53 @@
+services:
+  db:
+    image: postgres:16
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB}
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+    volumes:
+      - db_data:/var/lib/postgresql/data
+    restart: unless-stopped
+
+  api:
+    build: ./api
+    environment:
+      DATABASE_URL: postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB}
+      JWT_SECRET: ${JWT_SECRET}
+      MAINADMIN_EMAIL: ${MAINADMIN_EMAIL}
+      MAINADMIN_PASSWORD: ${MAINADMIN_PASSWORD}
+    depends_on:
+      - db
+    restart: unless-stopped
+
+  os:
+    build: ./os
+    environment:
+      API_BASE_URL: https://${API_DOMAIN}
+      RADIO_IFRAME_SRC: ${RADIO_IFRAME_SRC}
+    depends_on:
+      - api
+    restart: unless-stopped
+
+  admin:
+    build: ./admin
+    environment:
+      API_BASE_URL: https://${API_DOMAIN}
+    depends_on:
+      - api
+    restart: unless-stopped
+
+  nginx:
+    image: nginx:alpine
+    ports:
+      - "80:80"
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+    depends_on:
+      - os
+      - admin
+      - api
+    restart: unless-stopped
+
+volumes:
+  db_data:
