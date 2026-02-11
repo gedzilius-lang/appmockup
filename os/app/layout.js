@@ -6,6 +6,7 @@ export default function RootLayout({ children }) {
         <div style={{display:"flex", gap:12, alignItems:"center", marginBottom:16}}>
           <a href="/" style={{fontWeight:800, textDecoration:"none"}}>PWL • Zurich</a>
           <a href="/radio">Radio</a>
+            <a href="/ops">Ops</a>
           <a href="https://admin.peoplewelike.club" target="_blank">Admin</a>
         </div>
         {children}

@@ -18,6 +18,11 @@ export default function Admin() {
   const [eventTitle, setEventTitle] = useState("Demo Night");
   const [eventVenue, setEventVenue] = useState("Zurich Demo Venue");
   const [eventTime, setEventTime] = useState(new Date(Date.now()+86400000).toISOString());
+  const [invVenueId, setInvVenueId] = useState("");
+  const [invItem, setInvItem] = useState("Vodka");
+  const [invQty, setInvQty] = useState("20");
+  const [invLow, setInvLow] = useState("5");
+
 
   async function login(e, p) {
     const res = await fetch(`${API}/auth/login`, {

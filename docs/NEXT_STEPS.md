@@ -15,3 +15,10 @@
 - Nitecoin wallet rules + redemption
 - Rule engine and automation
 - Realtime websockets
+
+## Phase 1.1 implemented (Ops UI)
+- OS: /ops PIN login for BAR/RUNNER/SECURITY
+- Bar page: inventory list + sell action
+- Runner page: LOW_STOCK alerts (polling)
+- Security page: incident logging + recent logs
+- Admin: inventory creation UI
