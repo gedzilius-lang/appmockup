@@ -1,0 +1,276 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --bg-primary: #0a0a0f;
+  --bg-card: #14141f;
+  --bg-card-hover: #1a1a2e;
+  --bg-input: #0f0f1a;
+  --neon-purple: #a855f7;
+  --neon-cyan: #06b6d4;
+  --neon-pink: #ec4899;
+  --neon-green: #22c55e;
+  --neon-orange: #f97316;
+  --neon-red: #ef4444;
+  --text-primary: #e2e8f0;
+  --text-muted: #64748b;
+  --border-color: #1e1e2e;
+  --border-glow: #a855f733;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  background: var(--bg-primary);
+  color: var(--text-primary);
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  -webkit-font-smoothing: antialiased;
+  -webkit-tap-highlight-color: transparent;
+}
+
+a {
+  color: var(--neon-cyan);
+  text-decoration: none;
+  transition: color 0.2s;
+}
+a:hover {
+  color: var(--neon-purple);
+}
+
+/* ─── Inputs ─────────────────────────────── */
+input, select, textarea {
+  background: var(--bg-input);
+  border: 1px solid var(--border-color);
+  color: var(--text-primary);
+  padding: 0.625rem 0.875rem;
+  border-radius: 0.5rem;
+  font-size: 0.875rem;
+  outline: none;
+  transition: border-color 0.2s, box-shadow 0.2s;
+}
+input:focus, select:focus, textarea:focus {
+  border-color: var(--neon-purple);
+  box-shadow: 0 0 0 2px var(--border-glow);
+}
+input::placeholder, textarea::placeholder {
+  color: var(--text-muted);
+}
+select option {
+  background: var(--bg-card);
+  color: var(--text-primary);
+}
+
+/* ─── Buttons ────────────────────────────── */
+button, .btn {
+  padding: 0.5rem 1rem;
+  border-radius: 0.5rem;
+  font-size: 0.875rem;
+  font-weight: 600;
+  border: 1px solid var(--border-color);
+  background: var(--bg-card);
+  color: var(--text-primary);
+  cursor: pointer;
+  transition: all 0.2s;
+}
+button:hover, .btn:hover {
+  background: var(--bg-card-hover);
+  border-color: var(--neon-purple);
+}
+button:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.btn-primary {
+  background: var(--neon-purple);
+  border-color: var(--neon-purple);
+  color: #fff;
+}
+.btn-primary:hover {
+  background: #9333ea;
+  box-shadow: 0 0 20px #a855f740;
+}
+
+.btn-secondary {
+  background: transparent;
+  border-color: var(--neon-cyan);
+  color: var(--neon-cyan);
+}
+.btn-secondary:hover {
+  background: #06b6d410;
+  box-shadow: 0 0 20px #06b6d430;
+}
+
+.btn-danger {
+  background: transparent;
+  border-color: var(--neon-pink);
+  color: var(--neon-pink);
+}
+.btn-danger:hover {
+  background: #ec489910;
+  box-shadow: 0 0 20px #ec489930;
+}
+
+/* ─── Cards ──────────────────────────────── */
+.card {
+  background: var(--bg-card);
+  border: 1px solid var(--border-color);
+  border-radius: 0.75rem;
+  padding: 1.25rem;
+  transition: border-color 0.3s, box-shadow 0.3s;
+}
+.card:hover {
+  border-color: #a855f750;
+  box-shadow: 0 0 30px #a855f715;
+}
+.card-interactive {
+  cursor: pointer;
+}
+.card-interactive:hover {
+  border-color: var(--neon-purple);
+  box-shadow: 0 0 30px #a855f720;
+}
+
+/* ─── Tables ─────────────────────────────── */
+table {
+  width: 100%;
+  border-collapse: collapse;
+}
+th {
+  text-align: left;
+  padding: 0.75rem 1rem;
+  font-size: 0.75rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--text-muted);
+  border-bottom: 1px solid var(--border-color);
+}
+td {
+  padding: 0.75rem 1rem;
+  font-size: 0.875rem;
+  border-bottom: 1px solid var(--border-color);
+}
+tr:hover td {
+  background: var(--bg-card-hover);
+}
+
+/* ─── Tags / Pills ───────────────────────── */
+.tag {
+  display: inline-block;
+  padding: 0.2rem 0.6rem;
+  border-radius: 9999px;
+  font-size: 0.7rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+.tag-purple {
+  background: #a855f720;
+  color: var(--neon-purple);
+  border: 1px solid #a855f740;
+}
+.tag-cyan {
+  background: #06b6d420;
+  color: var(--neon-cyan);
+  border: 1px solid #06b6d440;
+}
+.tag-pink {
+  background: #ec489920;
+  color: var(--neon-pink);
+  border: 1px solid #ec489940;
+}
+.tag-green {
+  background: #22c55e20;
+  color: var(--neon-green);
+  border: 1px solid #22c55e40;
+}
+.tag-orange {
+  background: #f9731620;
+  color: var(--neon-orange);
+  border: 1px solid #f9731640;
+}
+.tag-red {
+  background: #ef444420;
+  color: var(--neon-red);
+  border: 1px solid #ef444440;
+}
+
+/* ─── Loading Spinner ────────────────────── */
+.spinner {
+  width: 1.5rem;
+  height: 1.5rem;
+  border: 2px solid var(--border-color);
+  border-top-color: var(--neon-purple);
+  border-radius: 50%;
+  animation: spin 0.6s linear infinite;
+}
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+
+/* ─── Toast ──────────────────────────────── */
+.toast {
+  position: fixed;
+  bottom: 1.5rem;
+  right: 1.5rem;
+  padding: 0.75rem 1.25rem;
+  border-radius: 0.5rem;
+  font-size: 0.875rem;
+  font-weight: 500;
+  z-index: 1000;
+  animation: slideUp 0.3s ease-out;
+  max-width: 20rem;
+}
+.toast-success {
+  background: #22c55e20;
+  border: 1px solid var(--neon-green);
+  color: var(--neon-green);
+}
+.toast-error {
+  background: #ef444420;
+  border: 1px solid var(--neon-red);
+  color: var(--neon-red);
+}
+.toast-info {
+  background: #06b6d420;
+  border: 1px solid var(--neon-cyan);
+  color: var(--neon-cyan);
+}
+@keyframes slideUp {
+  from { transform: translateY(1rem); opacity: 0; }
+  to { transform: translateY(0); opacity: 1; }
+}
+
+/* ─── Pulse animation ────────────────────── */
+@keyframes pulse-neon {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.5; }
+}
+.pulse-neon {
+  animation: pulse-neon 2s ease-in-out infinite;
+}
+
+/* ─── Utilities ──────────────────────────── */
+.text-muted {
+  color: var(--text-muted);
+}
+.text-neon-purple { color: var(--neon-purple); }
+.text-neon-cyan { color: var(--neon-cyan); }
+.text-neon-pink { color: var(--neon-pink); }
+.text-neon-green { color: var(--neon-green); }
+.text-neon-orange { color: var(--neon-orange); }
+.text-neon-red { color: var(--neon-red); }
+
+.glow-purple { box-shadow: 0 0 20px #a855f730; }
+.glow-cyan { box-shadow: 0 0 20px #06b6d430; }
+
+/* ─── Responsive ─────────────────────────── */
+@media (max-width: 640px) {
+  .card { padding: 1rem; }
+  button, .btn { padding: 0.5rem 0.75rem; font-size: 0.8rem; }
+}

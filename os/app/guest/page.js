@@ -7,8 +7,14 @@ export default function GuestPanel() {
   const [venues, setVenues] = useState([]);
   const [venueId, setVenueId] = useState("");
   const [uid, setUid] = useState("");
-  const [status, setStatus] = useState("");
+  const [toast, setToast] = useState(null);
+  const [loading, setLoading] = useState(false);
   const [me, setMe] = useState(null);
+
+  function showToast(message, type = "info") {
+    setToast({ message, type });
+    setTimeout(() => setToast(null), 3500);
+  }
 
   async function track(name, payload = {}) {
     try {
@@ -38,38 +44,45 @@ export default function GuestPanel() {
   }
 
   async function checkin() {
-    setStatus("Checking in...");
-    const res = await fetch(`${API_BASE}/guest/checkin`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ venue_id: Number(venueId), uid_tag: uid || null })
-    });
-    const j = await res.json();
-    if (!res.ok) { setStatus(j.error || "Failed"); return; }
-    localStorage.setItem("pwl_guest_token", j.token);
-    setStatus(`Checked in. Points awarded: ${j.points_awarded}`);
-    await track("checkin_ui", { points_awarded: j.points_awarded });
-    await loadMe();
+    setLoading(true);
+    try {
+      const res = await fetch(`${API_BASE}/guest/checkin`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ venue_id: Number(venueId), uid_tag: uid || null })
+      });
+      const j = await res.json();
+      if (!res.ok) { showToast(j.error || "Check-in failed", "error"); return; }
+      localStorage.setItem("pwl_guest_token", j.token);
+      showToast(`Checked in! +${j.points_awarded} NC, +${j.xp_awarded} XP`, "success");
+      await track("checkin_ui", { points_awarded: j.points_awarded });
+      await loadMe();
+    } catch { showToast("Network error", "error"); }
+    finally { setLoading(false); }
   }
 
   async function checkout() {
     const token = localStorage.getItem("pwl_guest_token");
     if (!token) return;
-    const res = await fetch(`${API_BASE}/guest/checkout`, {
-      method: "POST",
-      headers: { Authorization: `Bearer ${token}` }
-    });
-    const j = await res.json();
-    if (!res.ok) { alert(j.error || "Failed"); return; }
-    setStatus("Checked out.");
-    await track("checkout_ui", {});
-    await loadMe();
+    setLoading(true);
+    try {
+      const res = await fetch(`${API_BASE}/guest/checkout`, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      const j = await res.json();
+      if (!res.ok) { showToast(j.error || "Checkout failed", "error"); return; }
+      showToast("Checked out successfully", "success");
+      await track("checkout_ui", {});
+      await loadMe();
+    } catch { showToast("Network error", "error"); }
+    finally { setLoading(false); }
   }
 
   function clearSession() {
     localStorage.removeItem("pwl_guest_token");
     setMe(null);
-    setStatus("Cleared local session.");
+    showToast("Session cleared", "info");
   }
 
   useEffect(() => {
@@ -80,37 +93,80 @@ export default function GuestPanel() {
 
   return (
     <main>
-      <h1 style={{marginTop:0}}>Guest Panel</h1>
+      <h1 style={{ marginTop: 0, fontSize: "1.5rem", fontWeight: 800 }}>Guest Check-in</h1>
 
-      <div style={{border:"1px solid #ddd", borderRadius:12, padding:12, marginBottom:14}}>
-        <div style={{display:"flex", gap:10, flexWrap:"wrap", alignItems:"center"}}>
-          <select value={venueId} onChange={e=>setVenueId(e.target.value)}>
+      {/* Check-in card */}
+      <div className="card" style={{ marginBottom: "1rem" }}>
+        <div style={{ display: "flex", gap: "0.75rem", flexWrap: "wrap", alignItems: "center" }}>
+          <select value={venueId} onChange={e => setVenueId(e.target.value)} style={{ minWidth: 180, flex: "1 1 180px" }}>
             {venues.map(v => <option key={v.id} value={v.id}>{v.name} ({v.city})</option>)}
           </select>
-          <input placeholder="UID (optional, simulates NFC)" value={uid} onChange={e=>setUid(e.target.value)} />
-          <button onClick={checkin} disabled={!venueId}>Check in</button>
-          <button onClick={checkout}>End session</button>
-          <button onClick={clearSession}>Clear local</button>
+          <input
+            placeholder="UID tag (optional)"
+            value={uid}
+            onChange={e => setUid(e.target.value)}
+            style={{ flex: "1 1 160px" }}
+          />
         </div>
-        {status ? <p style={{marginTop:10}}>{status}</p> : null}
+        <div style={{ display: "flex", gap: "0.5rem", flexWrap: "wrap", marginTop: "0.75rem" }}>
+          <button className="btn-primary" onClick={checkin} disabled={!venueId || loading}>
+            {loading ? "..." : "Check In"}
+          </button>
+          <button className="btn-secondary" onClick={checkout} disabled={loading}>End Session</button>
+          <button onClick={clearSession} style={{ marginLeft: "auto" }}>Clear Local</button>
+        </div>
       </div>
 
-      <div style={{border:"1px solid #ddd", borderRadius:12, padding:12}}>
-        <h2 style={{marginTop:0}}>My status</h2>
+      {/* Status card */}
+      <div className="card">
+        <h2 style={{ marginTop: 0, fontSize: "1rem", fontWeight: 700, marginBottom: "0.75rem" }}>My Status</h2>
         {!me ? (
-          <div style={{opacity:.8}}>Not signed in. Check in to create a session.</div>
+          <div style={{ color: "#64748b", fontSize: "0.9rem" }}>
+            Not signed in. Check in to create a session.
+          </div>
         ) : (
-          <>
-            <div><b>Role:</b> {me.user.role}</div>
-            <div><b>Venue ID:</b> {me.user.venue_id}</div>
-            <div><b>Points:</b> {me.user.points}</div>
-            <div style={{marginTop:8, opacity:.9}}>
-              <b>Session:</b>{" "}
-              {me.session ? `active since ${new Date(me.session.started_at).toLocaleString()}` : "none"}
+          <div style={{ display: "grid", gap: "0.5rem" }}>
+            <div style={{ display: "flex", gap: "1rem", flexWrap: "wrap" }}>
+              <StatusItem label="Role" value={me.user.role} />
+              <StatusItem label="Points" value={`${me.user.points} NC`} color="#a855f7" />
+              <StatusItem label="XP" value={me.user.xp} color="#06b6d4" />
+              <StatusItem label="Level" value={me.user.level} color="#22c55e" />
             </div>
-          </>
+            <div style={{ marginTop: "0.5rem", fontSize: "0.85rem", color: "#94a3b8" }}>
+              {me.session ? (
+                <span>
+                  <span style={{ color: "#22c55e", marginRight: "0.4rem" }}>&#9679;</span>
+                  Active since {new Date(me.session.started_at).toLocaleTimeString()}
+                </span>
+              ) : (
+                <span style={{ color: "#64748b" }}>No active session</span>
+              )}
+            </div>
+          </div>
         )}
       </div>
+
+      {/* Toast */}
+      {toast && (
+        <div className={`toast toast-${toast.type}`}>
+          {toast.message}
+        </div>
+      )}
     </main>
+  );
+}
+
+function StatusItem({ label, value, color }) {
+  return (
+    <div style={{
+      background: "#0f0f1a",
+      border: "1px solid #1e1e2e",
+      borderRadius: "0.5rem",
+      padding: "0.5rem 0.75rem",
+      minWidth: 80,
+    }}>
+      <div style={{ fontSize: "0.65rem", color: "#64748b", textTransform: "uppercase", letterSpacing: "0.04em" }}>{label}</div>
+      <div style={{ fontSize: "1rem", fontWeight: 700, color: color || "#e2e8f0" }}>{value}</div>
+    </div>
   );
 }
