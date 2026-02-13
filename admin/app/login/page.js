@@ -1,7 +1,7 @@
 "use client";
 import { useState } from "react";
 
-const API = "https://api.peoplewelike.club";
+const API = process.env.NEXT_PUBLIC_API_BASE_URL || "https://api.peoplewelike.club";
 
 export default function LoginPage() {
   const [email, setEmail] = useState("");
