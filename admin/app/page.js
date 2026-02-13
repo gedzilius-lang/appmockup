@@ -1,7 +1,5 @@
 "use client";
-import { useState } from "react";
-
-const API = process.env.NEXT_PUBLIC_API_BASE_URL || "https://api.peoplewelike.club";
+import { useState, useEffect } from "react";
 
 export default function AdminLogin() {
   const [email, setEmail] = useState("");
@@ -9,12 +7,17 @@ export default function AdminLogin() {
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
 
+  useEffect(() => {
+    const t = localStorage.getItem("pwl_admin_token");
+    if (t) window.location.href = "/dashboard";
+  }, []);
+
   async function handleLogin(e) {
     e.preventDefault();
     setError("");
     setLoading(true);
     try {
-      const res = await fetch(`${API}/auth/login`, {
+      const res = await fetch("/api/auth/login", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ email, password }),
