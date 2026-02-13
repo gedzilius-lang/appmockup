@@ -301,7 +301,7 @@ app.post("/auth/login", async (req, reply) => {
 
 app.post("/auth/pin", async (req, reply) => {
   const { pin, role } = req.body || {};
-  if (!["BAR", "RUNNER", "SECURITY", "GUEST"].includes(role)) {
+  if (!["BAR", "RUNNER", "SECURITY", "GUEST", "VENUE_ADMIN"].includes(role)) {
     return reply.code(400).send({ error: "Invalid role" });
   }
   const v = await pool.query("SELECT * FROM venues WHERE pin=$1", [pin]);

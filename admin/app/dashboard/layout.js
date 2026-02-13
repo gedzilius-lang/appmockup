@@ -1,6 +1,6 @@
 "use client";
 import { useEffect } from "react";
-import { useAuth } from "../lib/auth";
+import { AuthProvider, useAuth } from "../lib/auth";
 
 const NAV_ITEMS = [
   { href: "/dashboard", label: "Dashboard", icon: "\u25A3" },
@@ -15,11 +15,19 @@ const NAV_ITEMS = [
 ];
 
 export default function DashboardLayout({ children }) {
+  return (
+    <AuthProvider>
+      <DashboardInner>{children}</DashboardInner>
+    </AuthProvider>
+  );
+}
+
+function DashboardInner({ children }) {
   const { token, ready, logout } = useAuth();
 
   useEffect(() => {
     if (ready && !token) {
-      window.location.href = "/login";
+      window.location.href = "/";
     }
   }, [ready, token]);
 
@@ -92,7 +100,7 @@ export default function DashboardLayout({ children }) {
             View OS Site &rarr;
           </a>
           <button
-            onClick={() => { logout(); window.location.href = "/login"; }}
+            onClick={() => { logout(); window.location.href = "/"; }}
             style={{
               background: "transparent",
               border: "1px solid #1e1e2e",
