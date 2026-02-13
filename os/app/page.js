@@ -1,6 +1,6 @@
 export const dynamic = "force-dynamic";
 
-const API_BASE = process.env.API_BASE_URL || "https://api.peoplewelike.club";
+const API_BASE = process.env.INTERNAL_API_URL || process.env.API_BASE_URL || "https://api.peoplewelike.club";
 
 async function getEvents() {
   const res = await fetch(`${API_BASE}/events`, { cache: "no-store" });

@@ -24,6 +24,7 @@ services:
     build: ./os
     environment:
       API_BASE_URL: https://${API_DOMAIN}
+      INTERNAL_API_URL: http://api:4000
       RADIO_IFRAME_SRC: ${RADIO_IFRAME_SRC}
     depends_on:
       - api
