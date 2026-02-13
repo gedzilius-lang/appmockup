@@ -12,6 +12,8 @@ const pool = new Pool({ connectionString: process.env.DATABASE_URL });
 
 const JWT_SECRET = process.env.JWT_SECRET;
 
+app.get("/", () => ({ status: "ok", service: "pwl-api" }));
+
 // ─── XP Helpers ──────────────────────────────────────────────
 function xpForLevel(level) {
   return Math.round(100 * Math.pow(level, 1.35));
