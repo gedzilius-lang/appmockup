@@ -38,22 +38,68 @@
 - Supermarket seed: venue + 12 inventory items + 11 menu items
 - `requireAuth`/`requireRole` made async (fixed preHandler hang)
 
-## Verified on VPS
-- [x] API health (`/health` → `{"ok":true}`)
-- [x] `/config` returns `{"feature_layer":1}`
-- [x] Transactional order: Beer x2 → total 10 NC (server-side price), stock 98→96
-- [x] Idempotency: same key returns same order (no duplicate)
-- [x] Feature gate: `/quests/1` returns `FEATURE_LOCKED` (layer 1 < required 2)
-- [x] Legacy `/actions/sell` returns 410 Gone
+## Phase D — External Reachability (verified 2026-02-17)
+
+### Fix Applied
+- **nginx stale DNS**: os/admin containers rebuilt → new IPs, but nginx (running 4 days) cached old IPs → 502. Fix: `docker compose restart nginx`.
+
+### External Reachability (via Cloudflare, from VPS --resolve)
+| URL | Status |
+|---|---|
+| os.peoplewelike.club/ | 200 |
+| os.peoplewelike.club/api/health | 200 `{"ok":true}` |
+| admin.peoplewelike.club/ | 200 |
+| admin.peoplewelike.club/api/health | 200 `{"ok":true}` |
+| api.peoplewelike.club/health | 200 `{"ok":true}` |
+
+### Origin TLS
+- Self-signed cert (CN=peoplewelike.club), valid 2026-02-11 → 2027-02-11
+- Cloudflare SSL mode = Full (accepts self-signed origin cert)
+
+### VERIFY_LAYER1 API Checks (all via Cloudflare)
+- [x] PIN login SECURITY → token, venue_id 2
+- [x] Wallet topup 100 NC → new_balance 110
+- [x] Max topup >5000 → `MAX_TOPUP_EXCEEDED`
+- [x] PIN login BAR → token, venue_id 2
+- [x] Place order Beer x2 → total 10 NC, order created
+- [x] `/config` → `{"feature_layer":1}`
+- [x] `/quests/2` → `FEATURE_LOCKED` (layer 2)
+- [x] `/rules/2` → `FEATURE_LOCKED` (layer 2)
+- [x] `/analytics/2` → `FEATURE_LOCKED` (layer 3)
+- [x] POST `/actions/sell` → 410 Gone
+
+### Earlier Verifications (still valid)
+- [x] Transactional order: server-side price, FOR UPDATE lock, stock decrement
+- [x] Idempotency: same key returns same order
 - [x] PIN auth reuses staff user (uid 22 both logins)
 - [x] CHECK constraint `users_points_non_negative` active in DB
-- [x] OS container rebuilt with bar page changes
 
 ## Known Issues
+- **Local machine (company proxy)** — curl from dev machine fails with "Connection was reset" (company firewall, not a server issue)
 - **Wallet topup via uid_tag** — not yet tested from browser UI
-- **Admin container** — not rebuilt this session (no changes needed)
 - **FEATURE_LAYER env** — not in VPS `.env` yet (defaults to 1, which is correct)
 
+## Phase E — UI Polish (deployed 2026-02-17)
+
+### Changes
+1. **OS theme + ui helpers**: CSS variables already existed; added `.tile`, `.chip`, `.cart-sticky`, `.submit-overlay`, `.btn-confirm`, `.btn-press`, `.qty-badge`, `.input-error` classes. Created `os/app/lib/ui.js` with className helpers.
+2. **POS (/ops/bar)**: Tiles with `:active` scale feedback, quantity badges on selected items, sticky bottom cart on mobile, full-width confirm button showing total, submit overlay during order, order ID in success toast.
+3. **Security (/ops/security)**: Top-up panel with gradient background + purple glow, quick amount chips (+20/50/100/200), input validation red highlights, persistent success message, friendly "slow down" on 429 rate limit.
+4. **Guest (/guest)**: Wallet balance moved to top (large 2.5rem purple number), active session panel with venue name + start time + spend, refresh button.
+5. **Admin login**: Subtle purple glow on card, button shadow, input focus transition.
+6. **Ops login (/ops)**: Press feedback on sign-in button.
+
+### Needs Browser Verification
+- [ ] /ops/bar: fast ordering with big tap targets on mobile
+- [ ] /ops/bar: qty badges visible on tiles, sticky cart stays at bottom
+- [ ] /ops/bar: submit overlay appears, order ID in success toast
+- [ ] /ops/security: quick amount chips fill the amount field
+- [ ] /ops/security: validation red highlight on empty UID + amount
+- [ ] /ops/security: success message persists after top-up
+- [ ] /guest: wallet balance large at top, session panel shows venue
+- [ ] /guest: refresh button re-fetches and updates
+
 ## Next Steps
-1. Phase D: Browser verification + VERIFY_LAYER1.md checklist
-2. Phase E: UI polish (only after D passes)
+1. Browser verification of Phase E changes (mobile + desktop)
+2. Fix any regressions found during verification
+3. Phase 2 planning
