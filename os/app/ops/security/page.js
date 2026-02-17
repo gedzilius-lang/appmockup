@@ -1,5 +1,6 @@
 "use client";
 import { useEffect, useState } from "react";
+import { isNfcSupported, scanUidOnce } from "../../lib/nfc";
 
 const API_BASE = "/api";
 const QUICK_AMOUNTS = [20, 50, 100, 200];
@@ -45,6 +46,27 @@ export default function SecurityPage() {
   const [topupSuccess, setTopupSuccess] = useState(null);
   // Validation
   const [topupErrors, setTopupErrors] = useState({});
+  // NFC
+  const [scanning, setScanning] = useState(false);
+  const [scanCtrl, setScanCtrl] = useState(null);
+  const nfcAvailable = typeof window !== "undefined" && isNfcSupported();
+
+  function startNfcScan() {
+    if (scanning && scanCtrl) { scanCtrl.abort(); setScanning(false); return; }
+    setScanning(true);
+    const ctrl = scanUidOnce({
+      onUid: (uid) => {
+        setTopupUid(uid);
+        setScanning(false);
+        showToast("NFC scan successful", "success");
+      },
+      onError: (err) => {
+        setScanning(false);
+        showToast(err.message || "NFC scan failed", "error");
+      },
+    });
+    setScanCtrl(ctrl);
+  }
 
   const token = typeof window !== "undefined" ? localStorage.getItem("pwl_token") : null;
   const venueId = typeof window !== "undefined" ? localStorage.getItem("pwl_venue_id") : null;
@@ -159,13 +181,25 @@ export default function SecurityPage() {
 
         {/* ID inputs */}
         <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "0.5rem", marginBottom: "0.75rem" }}>
-          <input
-            placeholder="UID tag"
-            value={topupUid}
-            onChange={e => { setTopupUid(e.target.value); setTopupErrors(prev => ({ ...prev, uid: false, session: false })); }}
-            className={topupErrors.uid ? "input-error" : ""}
-            style={{ fontSize: "0.85rem", padding: "0.5rem 0.65rem" }}
-          />
+          <div style={{ display: "flex", gap: "0.35rem" }}>
+            <input
+              placeholder="UID tag"
+              value={topupUid}
+              onChange={e => { setTopupUid(e.target.value); setTopupErrors(prev => ({ ...prev, uid: false, session: false })); }}
+              className={topupErrors.uid ? "input-error" : ""}
+              style={{ fontSize: "0.85rem", padding: "0.5rem 0.65rem", flex: 1 }}
+            />
+            {nfcAvailable && (
+              <button
+                onClick={startNfcScan}
+                className={`btn-press ${scanning ? "btn-danger" : "btn-secondary"}`}
+                style={{ padding: "0.4rem 0.6rem", fontSize: "0.75rem", whiteSpace: "nowrap" }}
+                title="Scan NFC tag"
+              >
+                {scanning ? "Stop" : "📡 NFC"}
+              </button>
+            )}
+          </div>
           <input
             placeholder="Session ID"
             value={topupSessionId}
@@ -174,6 +208,11 @@ export default function SecurityPage() {
             style={{ fontSize: "0.85rem", padding: "0.5rem 0.65rem" }}
           />
         </div>
+        {!nfcAvailable && (
+          <p style={{ margin: "0 0 0.5rem", fontSize: "0.65rem", color: "#64748b" }}>
+            NFC scan supported on Android Chrome (HTTPS). Manual UID entry for other browsers.
+          </p>
+        )}
 
         {/* Quick amount chips */}
         <div style={{ display: "flex", gap: "0.4rem", flexWrap: "wrap", marginBottom: "0.75rem" }}>

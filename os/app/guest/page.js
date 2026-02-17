@@ -1,5 +1,6 @@
 "use client";
 import { useEffect, useState } from "react";
+import { isNfcSupported, scanUidOnce } from "../lib/nfc";
 
 const API_BASE = "/api";
 
@@ -11,6 +12,17 @@ export default function GuestPanel() {
   const [loading, setLoading] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
   const [me, setMe] = useState(null);
+  const [scanning, setScanning] = useState(false);
+  const nfcAvailable = typeof window !== "undefined" && isNfcSupported();
+
+  function startNfcScan() {
+    if (scanning) return;
+    setScanning(true);
+    scanUidOnce({
+      onUid: (u) => { setUid(u); setScanning(false); showToast("NFC scan successful", "success"); },
+      onError: (err) => { setScanning(false); showToast(err.message || "NFC scan failed", "error"); },
+    });
+  }
 
   function showToast(message, type = "info") {
     setToast({ message, type });
@@ -162,12 +174,23 @@ export default function GuestPanel() {
           <select value={venueId} onChange={e => setVenueId(e.target.value)} style={{ minWidth: 180, flex: "1 1 180px" }}>
             {venues.map(v => <option key={v.id} value={v.id}>{v.name} ({v.city})</option>)}
           </select>
-          <input
-            placeholder="UID tag (optional)"
-            value={uid}
-            onChange={e => setUid(e.target.value)}
-            style={{ flex: "1 1 160px" }}
-          />
+          <div style={{ display: "flex", gap: "0.35rem", flex: "1 1 160px" }}>
+            <input
+              placeholder="UID tag (optional)"
+              value={uid}
+              onChange={e => setUid(e.target.value)}
+              style={{ flex: 1 }}
+            />
+            {nfcAvailable && (
+              <button
+                onClick={startNfcScan}
+                className={`btn-press ${scanning ? "btn-danger" : "btn-secondary"}`}
+                style={{ padding: "0.4rem 0.6rem", fontSize: "0.75rem", whiteSpace: "nowrap" }}
+              >
+                {scanning ? "Stop" : "📡 NFC"}
+              </button>
+            )}
+          </div>
         </div>
         <div style={{ display: "flex", gap: "0.5rem", flexWrap: "wrap", marginTop: "0.75rem" }}>
           <button className="btn-primary btn-press" onClick={checkin} disabled={!venueId || loading}>
