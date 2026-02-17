@@ -299,7 +299,7 @@ function signToken(user) {
   );
 }
 
-function requireAuth(req, reply) {
+async function requireAuth(req, reply) {
   const h = req.headers.authorization || "";
   const token = h.startsWith("Bearer ") ? h.slice(7) : null;
   if (!token) return reply.code(401).send({ error: "Missing token" });
@@ -311,8 +311,8 @@ function requireAuth(req, reply) {
 }
 
 function requireRole(roles) {
-  return (req, reply) => {
-    requireAuth(req, reply);
+  return async (req, reply) => {
+    await requireAuth(req, reply);
     if (reply.sent) return;
     if (!roles.includes(req.user.role))
       return reply.code(403).send({ error: "Forbidden" });
