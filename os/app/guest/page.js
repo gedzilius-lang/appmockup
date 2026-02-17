@@ -9,6 +9,7 @@ export default function GuestPanel() {
   const [uid, setUid] = useState("");
   const [toast, setToast] = useState(null);
   const [loading, setLoading] = useState(false);
+  const [refreshing, setRefreshing] = useState(false);
   const [me, setMe] = useState(null);
 
   function showToast(message, type = "info") {
@@ -41,6 +42,13 @@ export default function GuestPanel() {
     const j = await res.json();
     if (!res.ok) { setMe(null); return; }
     setMe(j);
+  }
+
+  async function refreshMe() {
+    setRefreshing(true);
+    await loadMe();
+    setRefreshing(false);
+    showToast("Refreshed", "info");
   }
 
   async function checkin() {
@@ -91,12 +99,65 @@ export default function GuestPanel() {
     track("pageview", { page: "/guest" });
   }, []);
 
+  const venueName = me?.session?.venue_id
+    ? venues.find(v => v.id === me.session.venue_id)?.name || `Venue #${me.session.venue_id}`
+    : null;
+
   return (
     <main>
-      <h1 style={{ marginTop: 0, fontSize: "1.5rem", fontWeight: 800 }}>Guest Check-in</h1>
+      <h1 style={{ marginTop: 0, fontSize: "1.5rem", fontWeight: 800 }}>Guest</h1>
+
+      {/* Wallet Balance — top, prominent */}
+      {me && (
+        <div className="card" style={{
+          marginBottom: "1rem",
+          border: "1px solid #a855f740",
+          boxShadow: "0 0 20px #a855f715",
+          background: "linear-gradient(135deg, #14141f 0%, #1a1028 100%)",
+          textAlign: "center",
+          padding: "1.5rem 1rem",
+        }}>
+          <div style={{ fontSize: "0.7rem", color: "#64748b", textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: "0.25rem" }}>
+            Wallet Balance
+          </div>
+          <div style={{ fontSize: "2.5rem", fontWeight: 900, color: "#a855f7", lineHeight: 1 }}>
+            {me.user.points} <span style={{ fontSize: "1rem", fontWeight: 600 }}>NC</span>
+          </div>
+          <div style={{ display: "flex", justifyContent: "center", gap: "1.25rem", marginTop: "0.75rem" }}>
+            <MiniStat label="XP" value={me.user.xp} color="#06b6d4" />
+            <MiniStat label="Level" value={me.user.level} color="#22c55e" />
+          </div>
+          <button
+            onClick={refreshMe}
+            disabled={refreshing}
+            className="btn-secondary btn-press"
+            style={{ marginTop: "1rem", fontSize: "0.8rem", padding: "0.35rem 1rem" }}
+          >
+            {refreshing ? "..." : "Refresh"}
+          </button>
+        </div>
+      )}
+
+      {/* Active Session Panel */}
+      {me?.session && (
+        <div className="card" style={{ marginBottom: "1rem", padding: "1rem 1.25rem" }}>
+          <div style={{ display: "flex", alignItems: "center", gap: "0.5rem", marginBottom: "0.5rem" }}>
+            <span style={{ width: 8, height: 8, borderRadius: "50%", background: "#22c55e", display: "inline-block", boxShadow: "0 0 6px #22c55e80" }} />
+            <span style={{ fontSize: "0.85rem", fontWeight: 700, color: "#22c55e" }}>Active Session</span>
+          </div>
+          <div style={{ display: "flex", gap: "1rem", flexWrap: "wrap", fontSize: "0.85rem", color: "#94a3b8" }}>
+            {venueName && <span>{venueName}</span>}
+            <span>Started {new Date(me.session.started_at).toLocaleTimeString()}</span>
+            {me.session.total_spent != null && (
+              <span>Spent: <span style={{ color: "#f97316", fontWeight: 600 }}>{me.session.total_spent} NC</span></span>
+            )}
+          </div>
+        </div>
+      )}
 
       {/* Check-in card */}
       <div className="card" style={{ marginBottom: "1rem" }}>
+        <h2 style={{ marginTop: 0, fontSize: "0.95rem", fontWeight: 700, marginBottom: "0.75rem" }}>Check In</h2>
         <div style={{ display: "flex", gap: "0.75rem", flexWrap: "wrap", alignItems: "center" }}>
           <select value={venueId} onChange={e => setVenueId(e.target.value)} style={{ minWidth: 180, flex: "1 1 180px" }}>
             {venues.map(v => <option key={v.id} value={v.id}>{v.name} ({v.city})</option>)}
@@ -109,42 +170,20 @@ export default function GuestPanel() {
           />
         </div>
         <div style={{ display: "flex", gap: "0.5rem", flexWrap: "wrap", marginTop: "0.75rem" }}>
-          <button className="btn-primary" onClick={checkin} disabled={!venueId || loading}>
+          <button className="btn-primary btn-press" onClick={checkin} disabled={!venueId || loading}>
             {loading ? "..." : "Check In"}
           </button>
-          <button className="btn-secondary" onClick={checkout} disabled={loading}>End Session</button>
-          <button onClick={clearSession} style={{ marginLeft: "auto" }}>Clear Local</button>
+          <button className="btn-secondary btn-press" onClick={checkout} disabled={loading}>End Session</button>
+          <button className="btn-press" onClick={clearSession} style={{ marginLeft: "auto" }}>Clear Local</button>
         </div>
       </div>
 
-      {/* Status card */}
-      <div className="card">
-        <h2 style={{ marginTop: 0, fontSize: "1rem", fontWeight: 700, marginBottom: "0.75rem" }}>My Status</h2>
-        {!me ? (
-          <div style={{ color: "#64748b", fontSize: "0.9rem" }}>
-            Not signed in. Check in to create a session.
-          </div>
-        ) : (
-          <div style={{ display: "grid", gap: "0.5rem" }}>
-            <div style={{ display: "flex", gap: "1rem", flexWrap: "wrap" }}>
-              <StatusItem label="Role" value={me.user.role} />
-              <StatusItem label="Points" value={`${me.user.points} NC`} color="#a855f7" />
-              <StatusItem label="XP" value={me.user.xp} color="#06b6d4" />
-              <StatusItem label="Level" value={me.user.level} color="#22c55e" />
-            </div>
-            <div style={{ marginTop: "0.5rem", fontSize: "0.85rem", color: "#94a3b8" }}>
-              {me.session ? (
-                <span>
-                  <span style={{ color: "#22c55e", marginRight: "0.4rem" }}>&#9679;</span>
-                  Active since {new Date(me.session.started_at).toLocaleTimeString()}
-                </span>
-              ) : (
-                <span style={{ color: "#64748b" }}>No active session</span>
-              )}
-            </div>
-          </div>
-        )}
-      </div>
+      {/* No session state */}
+      {!me && (
+        <div className="card" style={{ textAlign: "center", color: "#64748b", padding: "2rem" }}>
+          Not signed in. Check in to create a session.
+        </div>
+      )}
 
       {/* Toast */}
       {toast && (
@@ -156,17 +195,11 @@ export default function GuestPanel() {
   );
 }
 
-function StatusItem({ label, value, color }) {
+function MiniStat({ label, value, color }) {
   return (
-    <div style={{
-      background: "#0f0f1a",
-      border: "1px solid #1e1e2e",
-      borderRadius: "0.5rem",
-      padding: "0.5rem 0.75rem",
-      minWidth: 80,
-    }}>
-      <div style={{ fontSize: "0.65rem", color: "#64748b", textTransform: "uppercase", letterSpacing: "0.04em" }}>{label}</div>
-      <div style={{ fontSize: "1rem", fontWeight: 700, color: color || "#e2e8f0" }}>{value}</div>
+    <div>
+      <div style={{ fontSize: "0.6rem", color: "#64748b", textTransform: "uppercase", letterSpacing: "0.04em" }}>{label}</div>
+      <div style={{ fontSize: "1.1rem", fontWeight: 800, color: color || "#e2e8f0" }}>{value}</div>
     </div>
   );
 }
