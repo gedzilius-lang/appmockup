@@ -105,7 +105,7 @@ export default function OpsLogin() {
         {error && <p style={{ color: "#ef4444", fontSize: "0.85rem", margin: "0 0 0.75rem", textAlign: "center" }}>{error}</p>}
 
         <button
-          className="btn-primary"
+          className="btn-primary btn-press"
           onClick={login}
           disabled={!pin || loading}
           style={{ width: "100%", padding: "0.65rem" }}

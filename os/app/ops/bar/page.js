@@ -15,6 +15,7 @@ export default function BarPOS() {
   const [now, setNow] = useState(Date.now());
   const [loading, setLoading] = useState(true);
   const [isMobile, setIsMobile] = useState(false);
+  const [submitting, setSubmitting] = useState(false);
 
   const token = typeof window !== "undefined" ? localStorage.getItem("pwl_token") : null;
   const venueId = typeof window !== "undefined" ? localStorage.getItem("pwl_venue_id") : null;
@@ -35,27 +36,18 @@ export default function BarPOS() {
 
   async function loadMenu() {
     if (!token || !venueId) return;
-    try {
-      const data = await apiFetch(`/menu/${venueId}`);
-      setMenu(data);
-    } catch {}
+    try { setMenu(await apiFetch(`/menu/${venueId}`)); } catch {}
     setLoading(false);
   }
 
   async function loadOrders() {
     if (!token || !venueId) return;
-    try {
-      const data = await apiFetch(`/orders/${venueId}`);
-      setOrders(data);
-    } catch {}
+    try { setOrders(await apiFetch(`/orders/${venueId}`)); } catch {}
   }
 
   async function loadSummary() {
     if (!token) return;
-    try {
-      const data = await apiFetch("/shift/summary");
-      setSummary(data);
-    } catch {}
+    try { setSummary(await apiFetch("/shift/summary")); } catch {}
   }
 
   // ── Cart ──────────────────────────────────────────────────────
@@ -88,10 +80,13 @@ export default function BarPOS() {
   function clearCart() { setCart([]); }
 
   const cartTotal = cart.reduce((sum, c) => sum + c.price * c.qty, 0);
+  const cartCount = cart.reduce((sum, c) => sum + c.qty, 0);
+
+  // Cart item qty lookup for tile badges
+  const cartQtyMap = {};
+  cart.forEach(c => { cartQtyMap[c.menu_item_id] = c.qty; });
 
   // ── Orders ────────────────────────────────────────────────────
-
-  const [submitting, setSubmitting] = useState(false);
 
   async function submitOrder() {
     if (cart.length === 0 || submitting) return;
@@ -105,11 +100,12 @@ export default function BarPOS() {
         inventory_item_id: c.inventory_item_id,
       }));
       const idempotency_key = `${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
-      await apiFetch("/orders", {
+      const result = await apiFetch("/orders", {
         method: "POST",
         body: JSON.stringify({ venue_id: Number(venueId), items: orderItems, payment_method: "cash", idempotency_key }),
       });
-      showToast(`Order confirmed — ${cartTotal} NC`, "success");
+      const orderId = result?.id || result?.order_id || "?";
+      showToast(`Order #${orderId} confirmed — ${cartTotal} NC`, "success");
       clearCart();
       loadOrders();
       loadSummary();
@@ -181,21 +177,24 @@ export default function BarPOS() {
     return <main><div style={{ display: "flex", justifyContent: "center", padding: "3rem" }}><div className="spinner" /></div></main>;
   }
 
-  // ── Cart Panel (shared between desktop sidebar & mobile bottom) ─
+  // ── Cart Panel ────────────────────────────────────────────────
 
   const cartPanel = cart.length > 0 && (
-    <div className="card" style={{ alignSelf: "start", ...(isMobile ? {} : { position: "sticky", top: "1rem" }) }}>
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "0.75rem" }}>
-        <h2 style={{ margin: 0, fontSize: "1rem", fontWeight: 800 }}>Cart</h2>
+    <div className={isMobile ? "cart-sticky" : "card"} style={!isMobile ? { alignSelf: "start", position: "sticky", top: "1rem" } : {}}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "0.5rem" }}>
+        <h2 style={{ margin: 0, fontSize: "1rem", fontWeight: 800 }}>
+          Cart <span style={{ fontSize: "0.8rem", fontWeight: 600, color: "#64748b" }}>({cartCount})</span>
+        </h2>
         <button
           onClick={clearCart}
+          className="btn-press"
           style={{ fontSize: "0.7rem", padding: "0.2rem 0.5rem", color: "#ef4444", border: "1px solid #ef444440", background: "transparent", borderRadius: "0.375rem", cursor: "pointer" }}
         >
           Clear
         </button>
       </div>
 
-      <div style={{ display: "flex", flexDirection: "column", gap: "0.5rem" }}>
+      <div style={{ display: "flex", flexDirection: "column", gap: "0.4rem" }}>
         {cart.map(c => (
           <div key={c.menu_item_id} style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
             <div style={{ flex: 1, minWidth: 0 }}>
@@ -205,21 +204,17 @@ export default function BarPOS() {
               <div style={{ fontSize: "0.7rem", color: "#64748b" }}>{c.price} × {c.qty} = {c.price * c.qty} NC</div>
             </div>
             <div style={{ display: "flex", gap: "0.25rem", alignItems: "center", flexShrink: 0 }}>
-              <button onClick={() => updateCartQty(c.menu_item_id, -1)} style={qtyBtnStyle}>−</button>
+              <button onClick={() => updateCartQty(c.menu_item_id, -1)} className="btn-press" style={qtyBtnStyle}>−</button>
               <span style={{ width: "24px", textAlign: "center", fontSize: "0.85rem", fontWeight: 700 }}>{c.qty}</span>
-              <button onClick={() => updateCartQty(c.menu_item_id, 1)} style={qtyBtnStyle}>+</button>
+              <button onClick={() => updateCartQty(c.menu_item_id, 1)} className="btn-press" style={qtyBtnStyle}>+</button>
             </div>
           </div>
         ))}
       </div>
 
-      <div style={{ borderTop: "1px solid #1e293b", marginTop: "0.75rem", paddingTop: "0.75rem" }}>
-        <div style={{ display: "flex", justifyContent: "space-between", marginBottom: "0.75rem" }}>
-          <span style={{ fontWeight: 700 }}>Total</span>
-          <span style={{ fontWeight: 800, color: "#22c55e", fontSize: "1.1rem" }}>{cartTotal} NC</span>
-        </div>
-        <button onClick={submitOrder} disabled={submitting} className="btn-primary" style={{ width: "100%", padding: "0.65rem", fontSize: "0.9rem", fontWeight: 700, opacity: submitting ? 0.6 : 1 }}>
-          {submitting ? "Confirming..." : "Confirm Order"}
+      <div style={{ borderTop: "1px solid #1e293b", marginTop: "0.5rem", paddingTop: "0.5rem" }}>
+        <button onClick={submitOrder} disabled={submitting} className="btn-confirm">
+          {submitting ? "Confirming..." : `Confirm Order — ${cartTotal} NC`}
         </button>
       </div>
     </div>
@@ -228,18 +223,28 @@ export default function BarPOS() {
   // ── Render ────────────────────────────────────────────────────
 
   return (
-    <main style={{ paddingBottom: "1rem" }}>
+    <main style={{ paddingBottom: isMobile && cart.length > 0 ? "180px" : "1rem" }}>
+      {/* Submitting overlay */}
+      {submitting && (
+        <div className="submit-overlay">
+          <div style={{ textAlign: "center" }}>
+            <div className="spinner" style={{ width: "2.5rem", height: "2.5rem", margin: "0 auto 1rem" }} />
+            <div style={{ fontSize: "1.1rem", fontWeight: 700, color: "#a855f7" }}>Submitting order...</div>
+          </div>
+        </div>
+      )}
+
       {/* Header */}
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "0.75rem" }}>
         <h1 style={{ margin: 0, fontSize: "1.4rem", fontWeight: 800 }}>Bar POS</h1>
         <div style={{ display: "flex", gap: "0.5rem" }}>
-          <button onClick={() => setShowSummary(!showSummary)} className="btn-secondary" style={headerBtnStyle}>
+          <button onClick={() => setShowSummary(!showSummary)} className="btn-secondary btn-press" style={headerBtnStyle}>
             {showSummary ? "Hide Stats" : "Shift Stats"}
           </button>
-          <button onClick={() => setShowHistory(!showHistory)} className="btn-secondary" style={headerBtnStyle}>
+          <button onClick={() => setShowHistory(!showHistory)} className="btn-secondary btn-press" style={headerBtnStyle}>
             {showHistory ? "Hide History" : "Orders"}
           </button>
-          <button onClick={() => { window.location.href = "/ops"; }} style={headerBtnStyle}>Back</button>
+          <button onClick={() => { window.location.href = "/ops"; }} className="btn-press" style={headerBtnStyle}>Back</button>
         </div>
       </div>
 
@@ -273,6 +278,7 @@ export default function BarPOS() {
           <button
             key={cat}
             onClick={() => setActiveCategory(cat)}
+            className="btn-press"
             style={{
               padding: "0.4rem 0.85rem",
               fontSize: "0.8rem",
@@ -301,30 +307,16 @@ export default function BarPOS() {
           {filteredMenu.map(item => {
             const outOfStock = item.stock_qty != null && item.stock_qty <= 0;
             const lowStock = item.stock_qty != null && item.stock_qty > 0 && item.stock_qty <= (item.low_threshold || 5);
+            const inCart = cartQtyMap[item.id];
             return (
               <button
                 key={item.id}
                 onClick={() => !outOfStock && addToCart(item)}
                 disabled={outOfStock}
-                style={{
-                  display: "flex",
-                  flexDirection: "column",
-                  alignItems: "center",
-                  justifyContent: "center",
-                  padding: "0.75rem 0.5rem",
-                  background: outOfStock ? "#1a1a2e" : "#14141f",
-                  border: "1px solid #1e293b",
-                  borderRadius: "0.75rem",
-                  cursor: outOfStock ? "not-allowed" : "pointer",
-                  opacity: outOfStock ? 0.4 : 1,
-                  transition: "border-color 0.15s, transform 0.1s",
-                  minHeight: "100px",
-                  textAlign: "center",
-                }}
-                onPointerDown={e => { if (!outOfStock) e.currentTarget.style.transform = "scale(0.95)"; }}
-                onPointerUp={e => { e.currentTarget.style.transform = "scale(1)"; }}
-                onPointerLeave={e => { e.currentTarget.style.transform = "scale(1)"; }}
+                className="tile"
+                style={outOfStock ? { opacity: 0.35, cursor: "not-allowed" } : {}}
               >
+                {inCart > 0 && <span className="qty-badge">{inCart}</span>}
                 <span style={{ fontSize: "1.6rem", marginBottom: "0.3rem" }}>{item.icon || "🍹"}</span>
                 <span style={{ fontSize: "0.8rem", fontWeight: 700, color: "#e2e8f0", lineHeight: 1.2 }}>{item.name}</span>
                 <span style={{ fontSize: "0.75rem", fontWeight: 600, color: "#a855f7", marginTop: "0.15rem" }}>{item.price} NC</span>
@@ -351,12 +343,8 @@ export default function BarPOS() {
         {!isMobile && cartPanel}
       </div>
 
-      {/* Cart — mobile position (below grid) */}
-      {isMobile && cart.length > 0 && (
-        <div style={{ marginTop: "0.75rem" }}>
-          {cartPanel}
-        </div>
-      )}
+      {/* Cart — mobile position (sticky bottom) */}
+      {isMobile && cartPanel}
 
       {/* Order History */}
       {showHistory && (
@@ -381,7 +369,7 @@ export default function BarPOS() {
                     </div>
                   </div>
                   {canUndo && (
-                    <button onClick={() => undoOrder(o.id)} className="btn-danger" style={{ padding: "0.3rem 0.65rem", fontSize: "0.7rem", whiteSpace: "nowrap", flexShrink: 0, marginLeft: "0.5rem" }}>
+                    <button onClick={() => undoOrder(o.id)} className="btn-danger btn-press" style={{ padding: "0.3rem 0.65rem", fontSize: "0.7rem", whiteSpace: "nowrap", flexShrink: 0, marginLeft: "0.5rem" }}>
                       Undo ({60 - secondsAgo}s)
                     </button>
                   )}
@@ -403,9 +391,9 @@ export default function BarPOS() {
 const headerBtnStyle = { padding: "0.35rem 0.65rem", fontSize: "0.75rem" };
 const statLabel = { fontSize: "0.65rem", color: "#64748b", textTransform: "uppercase", letterSpacing: "0.05em" };
 const qtyBtnStyle = {
-  width: "28px",
-  height: "28px",
-  fontSize: "1rem",
+  width: "32px",
+  height: "32px",
+  fontSize: "1.1rem",
   padding: 0,
   display: "flex",
   alignItems: "center",
