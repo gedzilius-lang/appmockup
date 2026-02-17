@@ -1,7 +1,7 @@
 "use client";
 import { useEffect, useState, useRef } from "react";
 
-const API_BASE = process.env.NEXT_PUBLIC_API_BASE_URL || "https://api.peoplewelike.club";
+const API_BASE = "/api";
 
 function timeAgo(dateStr) {
   const diff = Date.now() - new Date(dateStr).getTime();

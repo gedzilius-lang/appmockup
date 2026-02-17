@@ -1,7 +1,7 @@
 "use client";
 import { useEffect, useState } from "react";
 
-const API_BASE = process.env.NEXT_PUBLIC_API_BASE_URL || "https://api.peoplewelike.club";
+const API_BASE = "/api";
 
 const TYPE_COLORS = {
   SELL: { bg: "#06b6d420", color: "#06b6d4", border: "#06b6d440" },
@@ -36,6 +36,11 @@ export default function SecurityPage() {
   const [incident, setIncident] = useState("");
   const [status, setStatus] = useState("");
   const [toast, setToast] = useState(null);
+  // Top-up state
+  const [topupUid, setTopupUid] = useState("");
+  const [topupSessionId, setTopupSessionId] = useState("");
+  const [topupAmount, setTopupAmount] = useState("");
+  const [topupLoading, setTopupLoading] = useState(false);
 
   const token = typeof window !== "undefined" ? localStorage.getItem("pwl_token") : null;
   const venueId = typeof window !== "undefined" ? localStorage.getItem("pwl_venue_id") : null;
@@ -72,6 +77,31 @@ export default function SecurityPage() {
     await load();
   }
 
+  async function topUp() {
+    const amt = Number(topupAmount);
+    if (!amt || amt <= 0) { showToast("Enter a valid amount", "error"); return; }
+    if (!topupUid.trim() && !topupSessionId.trim()) { showToast("Enter UID tag or Session ID", "error"); return; }
+    setTopupLoading(true);
+    try {
+      const body = { amount: amt };
+      if (topupSessionId.trim()) body.session_id = Number(topupSessionId);
+      else if (topupUid.trim()) body.uid_tag = topupUid.trim();
+      const res = await fetch(`${API_BASE}/wallet/topup`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+        body: JSON.stringify(body),
+      });
+      const j = await res.json();
+      if (!res.ok) { showToast(j.error || "Top-up failed", "error"); return; }
+      showToast(`+${amt} NC added. New balance: ${j.new_balance} NC`, "success");
+      setTopupAmount("");
+      setTopupUid("");
+      setTopupSessionId("");
+      await load();
+    } catch { showToast("Network error", "error"); }
+    finally { setTopupLoading(false); }
+  }
+
   useEffect(() => { load(); }, []);
 
   return (
@@ -85,6 +115,63 @@ export default function SecurityPage() {
       </div>
 
       {status && <div className="card" style={{ marginBottom: "1rem", color: "#f97316" }}>{status}</div>}
+
+      {/* Wallet Top-up */}
+      <div className="card" style={{
+        marginBottom: "1.25rem",
+        border: "1px solid #a855f730",
+        boxShadow: "0 0 12px #a855f710",
+      }}>
+        <h2 style={{ margin: "0 0 0.5rem", fontSize: "0.95rem", fontWeight: 700, color: "#a855f7" }}>
+          Top Up Wallet
+        </h2>
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "0.5rem", marginBottom: "0.5rem" }}>
+          <input
+            placeholder="UID tag"
+            value={topupUid}
+            onChange={e => setTopupUid(e.target.value)}
+            style={{ fontSize: "0.85rem", padding: "0.5rem 0.65rem" }}
+          />
+          <input
+            placeholder="Session ID"
+            value={topupSessionId}
+            onChange={e => setTopupSessionId(e.target.value)}
+            style={{ fontSize: "0.85rem", padding: "0.5rem 0.65rem" }}
+          />
+        </div>
+        <div style={{ display: "flex", gap: "0.5rem" }}>
+          <input
+            type="number"
+            placeholder="Amount (NC)"
+            min="1"
+            value={topupAmount}
+            onChange={e => setTopupAmount(e.target.value)}
+            onKeyDown={e => e.key === "Enter" && topUp()}
+            style={{ flex: 1, fontSize: "1rem", fontWeight: 700, padding: "0.5rem 0.65rem" }}
+          />
+          <button
+            onClick={topUp}
+            disabled={topupLoading}
+            style={{
+              padding: "0.5rem 1.25rem",
+              fontSize: "0.85rem",
+              fontWeight: 700,
+              background: "#a855f7",
+              color: "#fff",
+              border: "none",
+              borderRadius: "0.5rem",
+              cursor: topupLoading ? "wait" : "pointer",
+              transition: "background 0.15s, transform 0.1s",
+              boxShadow: "0 0 8px #a855f740",
+            }}
+            onPointerDown={e => { e.currentTarget.style.transform = "scale(0.96)"; }}
+            onPointerUp={e => { e.currentTarget.style.transform = "scale(1)"; }}
+            onPointerLeave={e => { e.currentTarget.style.transform = "scale(1)"; }}
+          >
+            {topupLoading ? "..." : "Top Up"}
+          </button>
+        </div>
+      </div>
 
       {/* Incident form */}
       <div className="card" style={{ marginBottom: "1.25rem" }}>

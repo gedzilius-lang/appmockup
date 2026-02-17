@@ -1,7 +1,7 @@
 "use client";
 import { useEffect, useState } from "react";
 
-const API_BASE = process.env.NEXT_PUBLIC_API_BASE_URL || "https://api.peoplewelike.club";
+const API_BASE = "/api";
 
 export default function BarPOS() {
   const [menu, setMenu] = useState([]);
@@ -91,8 +91,11 @@ export default function BarPOS() {
 
   // ── Orders ────────────────────────────────────────────────────
 
+  const [submitting, setSubmitting] = useState(false);
+
   async function submitOrder() {
-    if (cart.length === 0) return;
+    if (cart.length === 0 || submitting) return;
+    setSubmitting(true);
     try {
       const orderItems = cart.map(c => ({
         name: c.name,
@@ -100,9 +103,10 @@ export default function BarPOS() {
         qty: c.qty,
         inventory_item_id: c.inventory_item_id,
       }));
+      const idempotency_key = `${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
       await apiFetch("/orders", {
         method: "POST",
-        body: JSON.stringify({ venue_id: Number(venueId), items: orderItems, payment_method: "cash" }),
+        body: JSON.stringify({ venue_id: Number(venueId), items: orderItems, payment_method: "cash", idempotency_key }),
       });
       showToast(`Order confirmed — ${cartTotal} NC`, "success");
       clearCart();
@@ -111,6 +115,8 @@ export default function BarPOS() {
       loadMenu();
     } catch (err) {
       showToast(err.message, "error");
+    } finally {
+      setSubmitting(false);
     }
   }
 
@@ -207,8 +213,8 @@ export default function BarPOS() {
           <span style={{ fontWeight: 700 }}>Total</span>
           <span style={{ fontWeight: 800, color: "#22c55e", fontSize: "1.1rem" }}>{cartTotal} NC</span>
         </div>
-        <button onClick={submitOrder} className="btn-primary" style={{ width: "100%", padding: "0.65rem", fontSize: "0.9rem", fontWeight: 700 }}>
-          Confirm Order
+        <button onClick={submitOrder} disabled={submitting} className="btn-primary" style={{ width: "100%", padding: "0.65rem", fontSize: "0.9rem", fontWeight: 700, opacity: submitting ? 0.6 : 1 }}>
+          {submitting ? "Confirming..." : "Confirm Order"}
         </button>
       </div>
     </div>

@@ -1,7 +1,7 @@
 "use client";
 import { useState } from "react";
 
-const API_BASE = process.env.NEXT_PUBLIC_API_BASE_URL || "https://api.peoplewelike.club";
+const API_BASE = "/api";
 
 const ROLES = [
   { value: "BAR", label: "Bar", desc: "Sell items, manage inventory", color: "#06b6d4" },
