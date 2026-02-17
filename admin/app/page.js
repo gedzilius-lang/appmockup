@@ -49,7 +49,7 @@ export default function AdminLogin() {
             value={email}
             onChange={(e) => setEmail(e.target.value)}
             required
-            style={{ padding: "0.6rem 0.75rem", background: "#0f0f1a", border: "1px solid #1e1e2e", borderRadius: "0.5rem", color: "#e2e8f0", fontSize: "0.9rem", outline: "none" }}
+            style={{ padding: "0.6rem 0.75rem", background: "#0f0f1a", border: "1px solid #1e1e2e", borderRadius: "0.5rem", color: "#e2e8f0", fontSize: "1rem", outline: "none" }}
           />
           <input
             type="password"
@@ -57,7 +57,7 @@ export default function AdminLogin() {
             value={password}
             onChange={(e) => setPassword(e.target.value)}
             required
-            style={{ padding: "0.6rem 0.75rem", background: "#0f0f1a", border: "1px solid #1e1e2e", borderRadius: "0.5rem", color: "#e2e8f0", fontSize: "0.9rem", outline: "none" }}
+            style={{ padding: "0.6rem 0.75rem", background: "#0f0f1a", border: "1px solid #1e1e2e", borderRadius: "0.5rem", color: "#e2e8f0", fontSize: "1rem", outline: "none" }}
           />
           {error && <p style={{ color: "#ef4444", fontSize: "0.85rem", margin: 0 }}>{error}</p>}
           <button

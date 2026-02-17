@@ -144,7 +144,7 @@ export default function InventoryPage() {
         </div>
       )}
 
-      <div className="card" style={{ padding: 0, overflow: "hidden" }}>
+      <div className="card table-scroll" style={{ padding: 0 }}>
         <table>
           <thead>
             <tr>

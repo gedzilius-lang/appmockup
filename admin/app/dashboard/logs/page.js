@@ -64,7 +64,7 @@ export default function LogsPage() {
         </div>
       </div>
 
-      <div className="card" style={{ padding: 0, overflow: "hidden" }}>
+      <div className="card table-scroll" style={{ padding: 0 }}>
         {logs.length === 0 ? (
           <div style={{ textAlign: "center", color: "#64748b", padding: "2rem" }}>No logs found.</div>
         ) : (

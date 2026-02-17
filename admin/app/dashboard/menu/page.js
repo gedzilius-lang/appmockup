@@ -130,7 +130,7 @@ export default function MenuPage() {
           <h2 style={{ margin: "0 0 1rem", fontSize: "1rem", fontWeight: 700 }}>
             {editId ? "Edit Menu Item" : "Add Menu Item"}
           </h2>
-          <form onSubmit={save} style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: "0.75rem" }}>
+          <form onSubmit={save} className="form-grid">
             <div className="form-group">
               <label>Name</label>
               <input value={form.name} onChange={e => setForm({ ...form, name: e.target.value })} required placeholder="e.g. Pilsner" />
@@ -175,7 +175,7 @@ export default function MenuPage() {
         </div>
       )}
 
-      <div className="card" style={{ padding: 0, overflow: "hidden" }}>
+      <div className="card table-scroll" style={{ padding: 0 }}>
         <table>
           <thead>
             <tr>

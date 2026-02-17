@@ -85,7 +85,7 @@ const inputStyle = {
   border: "1px solid #1e1e2e",
   borderRadius: "0.5rem",
   color: "#e2e8f0",
-  fontSize: "0.9rem",
+  fontSize: "1rem",
   outline: "none",
   transition: "border-color 0.2s, box-shadow 0.2s",
 };

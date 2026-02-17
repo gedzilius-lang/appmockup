@@ -77,7 +77,7 @@ export default function VenuesPage() {
       {showForm && (
         <div className="card" style={{ marginBottom: "1.5rem" }}>
           <h2 style={{ margin: "0 0 1rem", fontSize: "1rem", fontWeight: 700 }}>Create Venue</h2>
-          <form onSubmit={create} style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "0.75rem" }}>
+          <form onSubmit={create} className="form-grid">
             <div className="form-group">
               <label>Name</label>
               <input value={form.name} onChange={e => setForm({ ...form, name: e.target.value })} required placeholder="Venue name" />
@@ -102,7 +102,7 @@ export default function VenuesPage() {
       )}
 
       {/* Table */}
-      <div className="card" style={{ padding: 0, overflow: "hidden" }}>
+      <div className="card table-scroll" style={{ padding: 0 }}>
         <table>
           <thead>
             <tr>
