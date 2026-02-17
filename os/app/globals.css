@@ -269,8 +269,151 @@ tr:hover td {
 .glow-purple { box-shadow: 0 0 20px #a855f730; }
 .glow-cyan { box-shadow: 0 0 20px #06b6d430; }
 
+/* ─── Tiles (POS menu items) ────────────── */
+.tile {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 0.75rem 0.5rem;
+  background: var(--bg-card);
+  border: 1px solid var(--border-color);
+  border-radius: 0.75rem;
+  cursor: pointer;
+  text-align: center;
+  min-height: 90px;
+  transition: border-color 0.15s, transform 0.1s, box-shadow 0.15s;
+  position: relative;
+  -webkit-user-select: none;
+  user-select: none;
+}
+.tile:active {
+  transform: scale(0.96);
+}
+.tile:hover {
+  border-color: #a855f750;
+  box-shadow: 0 0 12px #a855f715;
+}
+.tile[disabled] {
+  opacity: 0.35;
+  cursor: not-allowed;
+}
+.tile[disabled]:active {
+  transform: none;
+}
+
+/* Quantity badge on tile */
+.tile .qty-badge {
+  position: absolute;
+  top: -6px;
+  right: -6px;
+  background: var(--neon-purple);
+  color: #fff;
+  font-size: 0.7rem;
+  font-weight: 800;
+  min-width: 22px;
+  height: 22px;
+  border-radius: 11px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow: 0 0 8px #a855f760;
+}
+
+/* ─── Press feedback ────────────────────── */
+.btn-press:active {
+  transform: scale(0.97);
+}
+
+/* ─── Sticky cart (mobile) ──────────────── */
+.cart-sticky {
+  position: fixed;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  z-index: 90;
+  background: var(--bg-card);
+  border-top: 1px solid var(--border-color);
+  box-shadow: 0 -4px 20px rgba(0,0,0,0.5);
+  padding: 0.75rem 1rem;
+  max-height: 55vh;
+  overflow-y: auto;
+}
+
+/* ─── Submit overlay ────────────────────── */
+.submit-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 200;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(10,10,15,0.85);
+  backdrop-filter: blur(4px);
+  animation: fadeIn 0.15s ease-out;
+}
+@keyframes fadeIn {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+/* ─── Confirm button (full-width POS) ──── */
+.btn-confirm {
+  width: 100%;
+  padding: 0.85rem;
+  font-size: 1rem;
+  font-weight: 800;
+  background: var(--neon-purple);
+  border: none;
+  border-radius: 0.5rem;
+  color: #fff;
+  cursor: pointer;
+  transition: background 0.15s, transform 0.1s, box-shadow 0.15s;
+  box-shadow: 0 0 12px #a855f740;
+}
+.btn-confirm:active {
+  transform: scale(0.97);
+  background: #9333ea;
+}
+.btn-confirm:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+  transform: none;
+}
+
+/* ─── Quick chips (amount selector) ────── */
+.chip {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0.45rem 0.85rem;
+  border-radius: 9999px;
+  font-size: 0.85rem;
+  font-weight: 700;
+  border: 1px solid var(--border-color);
+  background: var(--bg-input);
+  color: var(--text-primary);
+  cursor: pointer;
+  transition: all 0.15s;
+}
+.chip:active {
+  transform: scale(0.95);
+}
+.chip:hover {
+  border-color: var(--neon-purple);
+  background: #a855f715;
+  color: var(--neon-purple);
+}
+
+/* ─── Validation error state ────────────── */
+.input-error {
+  border-color: var(--neon-red) !important;
+  box-shadow: 0 0 0 2px #ef444430 !important;
+}
+
 /* ─── Responsive ─────────────────────────── */
 @media (max-width: 640px) {
   .card { padding: 1rem; }
   button, .btn { padding: 0.5rem 0.75rem; font-size: 0.8rem; }
+  .tile { min-height: 80px; }
 }
