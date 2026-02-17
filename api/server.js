@@ -521,7 +521,6 @@ app.post("/guest/checkout", { preHandler: requireAuth }, async (req, reply) => {
 
 // ─── Wallet Top-up ──────────────────────────────────────────
 app.post("/wallet/topup", { preHandler: requireRole(["BAR", "SECURITY", "DOOR", ...ADMIN_ROLES]) }, async (req, reply) => {
-  app.log.info({ body: req.body }, "topup: handler entered");
   const { amount, user_id, session_id, uid_tag } = req.body || {};
   const a = Number(amount);
   if (!a || a <= 0 || !Number.isFinite(a)) {
@@ -561,12 +560,10 @@ app.post("/wallet/topup", { preHandler: requireRole(["BAR", "SECURITY", "DOOR", 
   }
 
   // Update balance + log (pool.query auto-releases connections)
-  app.log.info({ targetUserId, amount: a }, "topup: about to update balance");
   const r = await pool.query(
     "UPDATE users SET points = points + $1 WHERE id = $2 RETURNING points",
     [a, targetUserId]
   );
-  app.log.info({ rowCount: r.rowCount }, "topup: balance updated");
   if (r.rowCount === 0) {
     return reply.code(404).send({ error: "User not found" });
   }

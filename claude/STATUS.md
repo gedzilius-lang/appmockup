@@ -3,7 +3,7 @@
 ## Last Updated
 2026-02-17
 
-## Services
+## Services (all running on VPS)
 - **API** — Fastify on port 4000 (server.js)
 - **OS** — Next.js 14 on port 3000 (os/)
 - **Admin** — Next.js 14 on port 3001 (admin/)
@@ -11,32 +11,36 @@
 - **DB** — Postgres 16 via Docker
 
 ## What Changed (this session)
-- OS API proxy route created (`os/app/api/[...path]/route.js`)
-- All OS client-side pages switched to `/api` proxy (no more cross-domain)
-- `POST /wallet/topup` endpoint with atomic DB transaction (SECURITY/BAR/DOOR/ADMIN roles)
-- Wallet top-up UI panel on security page (UID tag or Session ID + amount)
-- `POST /orders` now atomic: order insert + inventory decrement + wallet deduct in one DB txn
-- Idempotency key on orders (unique constraint, client generates key per submit)
-- Bar POS confirm button disabled during submission + idempotency key sent
-- Supermarket seed: venue + 12 inventory items + 11 menu items (idempotent)
-- `idempotency_key` column + unique index added to orders table (idempotent migration)
+- OS API proxy route (`os/app/api/[...path]/route.js`)
+- All OS client-side pages switched to `/api` proxy
+- `POST /wallet/topup` endpoint (SECURITY/BAR/DOOR/ADMIN roles)
+- Wallet top-up UI panel on security page
+- `POST /orders` with idempotency key (unique constraint)
+- Bar POS: submit button disabled during send + idempotency key
+- Supermarket seed: venue + 12 inventory items + 11 menu items
+- **Fixed:** `requireAuth`/`requireRole` made async (was hanging all preHandler POST routes)
+- **Fixed:** Removed `pool.connect()` usage (caused connection pool hangs)
 
-## What Was Verified
-- [x] No hardcoded external API URLs in client-side OS code
-- [x] Server-side pages use INTERNAL_API_URL (correct for Docker)
-- [x] Wallet topup resolves session_id > uid_tag > user_id
-- [x] Orders are transactional (ROLLBACK on any failure)
+## Verified on VPS
+- [x] API health (`/health` → `{"ok":true}`)
+- [x] Supermarket venue seeded with inventory + menu
+- [x] Security login (PIN auth) works
+- [x] Bar login (PIN auth) works
+- [x] Admin login (email/password) works
+- [x] Wallet topup via `user_id` works (balance updated correctly)
+- [x] Order creation works (Beer x2, inventory 100→98)
 - [x] Idempotency key prevents duplicate orders
-- [x] Seed is idempotent (checks existence before insert)
+- [x] Menu endpoint returns all 11 items with stock levels
+- [x] No cross-domain API calls from OS frontend
 
 ## Known Issues
-- **Feature gates not implemented** — no FEATURE_LAYER env var enforcement yet
-- **Guest wallet display** — guest page shows points but could be more prominent
-- **No local Node.js** — cannot build-test locally, relies on Docker build on VPS
+- **Feature gates not implemented** — no FEATURE_LAYER env enforcement
+- **Wallet topup via uid_tag** — not yet tested from browser UI
+- **OS/Admin containers** — not yet rebuilt in this session (only API rebuilt)
 
 ## Next Steps
-1. Commit + push + deploy to VPS
-2. Verify all flows on VPS (security topup, bar POS, guest wallet, admin login)
+1. Rebuild OS container on VPS (has proxy route + API_BASE changes)
+2. Test full browser flows: security topup UI, bar POS, guest wallet
 3. Feature gates (FEATURE_LAYER env enforcement)
-4. Admin login debug if broken (P0)
+4. Admin login flow verification (if broken, fix immediately)
 5. UI polish (underground rave theme) after stability confirmed
