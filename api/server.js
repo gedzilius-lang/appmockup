@@ -559,30 +559,20 @@ app.post("/wallet/topup", { preHandler: requireRole(["BAR", "SECURITY", "DOOR", 
     targetUserId = user_id;
   }
 
-  // Atomic: update balance + log in transaction
-  const client = await pool.connect();
-  try {
-    await client.query("BEGIN");
-    const r = await client.query(
-      "UPDATE users SET points = points + $1 WHERE id = $2 RETURNING points",
-      [a, targetUserId]
-    );
-    if (r.rowCount === 0) {
-      await client.query("ROLLBACK");
-      return reply.code(404).send({ error: "User not found" });
-    }
-    await client.query(
-      "INSERT INTO logs (venue_id, type, payload) VALUES ($1,'TOPUP',$2)",
-      [venueId, { user_id: targetUserId, amount: a, staff_id: req.user.uid, new_balance: r.rows[0].points }]
-    );
-    await client.query("COMMIT");
-    return { ok: true, new_balance: r.rows[0].points, amount: a, user_id: targetUserId, venue_id: venueId };
-  } catch (err) {
-    await client.query("ROLLBACK");
-    throw err;
-  } finally {
-    client.release();
+  // Update balance + log (pool.query auto-releases connections)
+  const r = await pool.query(
+    "UPDATE users SET points = points + $1 WHERE id = $2 RETURNING points",
+    [a, targetUserId]
+  );
+  if (r.rowCount === 0) {
+    return reply.code(404).send({ error: "User not found" });
   }
+  const newBalance = r.rows[0].points;
+  await pool.query(
+    "INSERT INTO logs (venue_id, type, payload) VALUES ($1,'TOPUP',$2)",
+    [venueId, { user_id: targetUserId, amount: a, staff_id: req.user.uid, new_balance: newBalance }]
+  );
+  return { ok: true, new_balance: newBalance, amount: a, user_id: targetUserId, venue_id: venueId };
 });
 
 // ─── Venues ──────────────────────────────────────────────────
@@ -720,79 +710,52 @@ app.post("/orders", { preHandler: requireRole(["BAR"]) }, async (req, reply) => 
     total += (item.price || 0) * (item.qty || 1);
   }
 
-  // Atomic transaction: order + inventory + wallet + logs
-  const client = await pool.connect();
-  let order;
-  const lowStockAlerts = [];
-  try {
-    await client.query("BEGIN");
+  // Insert order
+  const o = await pool.query(
+    `INSERT INTO orders (venue_id, staff_user_id, guest_session_id, items, total, payment_method, idempotency_key)
+     VALUES ($1,$2,$3,$4,$5,$6,$7) RETURNING *`,
+    [venue_id, req.user.uid, guest_session_id || null, JSON.stringify(items), total, payment_method || "cash", idempotency_key || null]
+  );
+  const order = o.rows[0];
 
-    // 1. Insert order
-    const o = await client.query(
-      `INSERT INTO orders (venue_id, staff_user_id, guest_session_id, items, total, payment_method, idempotency_key)
-       VALUES ($1,$2,$3,$4,$5,$6,$7) RETURNING *`,
-      [venue_id, req.user.uid, guest_session_id || null, JSON.stringify(items), total, payment_method || "cash", idempotency_key || null]
-    );
-    order = o.rows[0];
-
-    // 2. Decrement inventory for each item
-    for (const item of items) {
-      if (item.inventory_item_id) {
-        const inv = await client.query(
-          "UPDATE inventory SET qty = qty - $1, updated_at = now() WHERE id = $2 RETURNING *",
-          [item.qty || 1, item.inventory_item_id]
-        );
-        if (inv.rowCount > 0 && inv.rows[0].qty <= inv.rows[0].low_threshold) {
-          lowStockAlerts.push(inv.rows[0]);
-        }
-      }
-    }
-
-    // 3. Deduct wallet if guest session linked
-    if (guest_session_id) {
-      await client.query(
-        "UPDATE venue_sessions SET total_spend = total_spend + $1, interactions_count = interactions_count + 1 WHERE id = $2",
-        [total, guest_session_id]
+  // Decrement inventory for each item
+  for (const item of items) {
+    if (item.inventory_item_id) {
+      const inv = await pool.query(
+        "UPDATE inventory SET qty = qty - $1, updated_at = now() WHERE id = $2 RETURNING *",
+        [item.qty || 1, item.inventory_item_id]
       );
-      const sess = await client.query("SELECT user_id FROM venue_sessions WHERE id=$1", [guest_session_id]);
-      if (sess.rowCount > 0) {
-        await client.query(
-          "UPDATE users SET points = points - $1 WHERE id = $2",
-          [total, sess.rows[0].user_id]
-        );
+      if (inv.rowCount > 0 && inv.rows[0].qty <= inv.rows[0].low_threshold) {
+        await pool.query(
+          "INSERT INTO logs (venue_id, type, payload) VALUES ($1,'LOW_STOCK',$2)",
+          [venue_id, { item: inv.rows[0].item, qty: inv.rows[0].qty, low_threshold: inv.rows[0].low_threshold }]
+        ).catch(() => {});
+        evaluateRules(venue_id, "inventory", { item: inv.rows[0].item, qty: inv.rows[0].qty }).catch(() => {});
       }
     }
-
-    // 4. Log the sale
-    await client.query(
-      "INSERT INTO logs (venue_id, type, payload) VALUES ($1,'SELL',$2)",
-      [venue_id, { order_id: order.id, items, total, payment_method: payment_method || "cash" }]
-    );
-
-    await client.query("COMMIT");
-  } catch (err) {
-    await client.query("ROLLBACK");
-    throw err;
-  } finally {
-    client.release();
   }
 
-  // Post-commit: low stock alerts + rule evaluation (non-transactional, best-effort)
-  for (const inv of lowStockAlerts) {
-    await pool.query(
-      "INSERT INTO logs (venue_id, type, payload) VALUES ($1,'LOW_STOCK',$2)",
-      [venue_id, { item: inv.item, qty: inv.qty, low_threshold: inv.low_threshold }]
-    ).catch(() => {});
-    evaluateRules(venue_id, "inventory", { item: inv.item, qty: inv.qty }).catch(() => {});
-  }
-
-  // Post-commit: award XP (best-effort, outside txn)
+  // Deduct wallet if guest session linked
   if (guest_session_id) {
+    await pool.query(
+      "UPDATE venue_sessions SET total_spend = total_spend + $1, interactions_count = interactions_count + 1 WHERE id = $2",
+      [total, guest_session_id]
+    );
     const sess = await pool.query("SELECT user_id FROM venue_sessions WHERE id=$1", [guest_session_id]);
     if (sess.rowCount > 0) {
+      await pool.query(
+        "UPDATE users SET points = points - $1 WHERE id = $2",
+        [total, sess.rows[0].user_id]
+      );
       awardXp(sess.rows[0].user_id, total).catch(() => {});
     }
   }
+
+  // Log the sale
+  await pool.query(
+    "INSERT INTO logs (venue_id, type, payload) VALUES ($1,'SELL',$2)",
+    [venue_id, { order_id: order.id, items, total, payment_method: payment_method || "cash" }]
+  );
 
   return order;
 });
