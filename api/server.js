@@ -223,6 +223,14 @@ async function initDb() {
     END $$;
   `);
 
+  // Add max_qty to inventory (for progress bars)
+  await pool.query(`
+    DO $$ BEGIN
+      ALTER TABLE inventory ADD COLUMN IF NOT EXISTS max_qty int;
+    EXCEPTION WHEN others THEN NULL;
+    END $$;
+  `);
+
   // Performance indexes (idempotent)
   await pool.query(`
     CREATE INDEX IF NOT EXISTS idx_venue_sessions_active ON venue_sessions(venue_id) WHERE ended_at IS NULL;
@@ -285,6 +293,14 @@ async function initDb() {
         [supermarketId, si.item, si.qty, si.low_threshold]
       );
     }
+  }
+
+  // Seed max_qty for existing inventory items (idempotent: only sets where null)
+  for (const si of seedInventory) {
+    await pool.query(
+      "UPDATE inventory SET max_qty = $1 WHERE venue_id = $2 AND item = $3 AND max_qty IS NULL",
+      [si.qty, supermarketId, si.item]
+    );
   }
 
   // Seed menu items (idempotent by venue_id + name)
