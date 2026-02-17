@@ -98,6 +98,7 @@ export default function BarPOS() {
     setSubmitting(true);
     try {
       const orderItems = cart.map(c => ({
+        menu_item_id: c.menu_item_id,
         name: c.name,
         price: c.price,
         qty: c.qty,
@@ -114,7 +115,11 @@ export default function BarPOS() {
       loadSummary();
       loadMenu();
     } catch (err) {
-      showToast(err.message, "error");
+      const d = err.data || {};
+      const msg = d.error === "OUT_OF_STOCK" ? `Out of stock: ${d.item}` :
+                  d.error === "INSUFFICIENT_FUNDS" ? `Insufficient funds (need ${d.required} NC, have ${d.balance} NC)` :
+                  err.message || "Order failed";
+      showToast(msg, "error");
     } finally {
       setSubmitting(false);
     }

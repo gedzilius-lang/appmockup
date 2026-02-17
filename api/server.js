@@ -8,7 +8,23 @@ const app = Fastify({ logger: true });
 await app.register(cors, { origin: true });
 
 const { Pool } = pg;
-const pool = new Pool({ connectionString: process.env.DATABASE_URL });
+const pool = new Pool({ connectionString: process.env.DATABASE_URL, max: 10 });
+
+// Transaction helper — always releases client in finally
+async function withTx(fn) {
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
+    const res = await fn(client);
+    await client.query("COMMIT");
+    return res;
+  } catch (e) {
+    await client.query("ROLLBACK").catch(() => {});
+    throw e;
+  } finally {
+    client.release();
+  }
+}
 
 const JWT_SECRET = process.env.JWT_SECRET;
 
@@ -197,6 +213,16 @@ async function initDb() {
   `);
   await pool.query(`CREATE UNIQUE INDEX IF NOT EXISTS idx_orders_idempotency ON orders(idempotency_key) WHERE idempotency_key IS NOT NULL`);
 
+  // Fix any negative balances before adding constraint
+  await pool.query(`UPDATE users SET points = 0 WHERE points < 0`);
+  // CHECK constraint — prevent negative wallet balance at DB level
+  await pool.query(`
+    DO $$ BEGIN
+      ALTER TABLE users ADD CONSTRAINT users_points_non_negative CHECK (points >= 0);
+    EXCEPTION WHEN duplicate_object THEN NULL;
+    END $$;
+  `);
+
   // Performance indexes (idempotent)
   await pool.query(`
     CREATE INDEX IF NOT EXISTS idx_venue_sessions_active ON venue_sessions(venue_id) WHERE ended_at IS NULL;
@@ -321,6 +347,31 @@ function requireRole(roles) {
 
 const ADMIN_ROLES = ["MAIN_ADMIN", "VENUE_ADMIN"];
 
+// ─── Feature Gates ──────────────────────────────────────────
+const FEATURE_LAYER = parseInt(process.env.FEATURE_LAYER || "1", 10);
+
+function requireLayer(minLayer) {
+  return async (req, reply) => {
+    if (FEATURE_LAYER < minLayer) {
+      return reply.code(403).send({ error: "FEATURE_LOCKED", required_layer: minLayer, current_layer: FEATURE_LAYER });
+    }
+  };
+}
+
+// ─── Rate Limiting (in-memory, per-staff) ───────────────────
+const rateLimitMap = new Map();
+function rateLimit(key, windowMs) {
+  return async (req, reply) => {
+    const id = `${key}:${req.user?.uid || "anon"}`;
+    const now = Date.now();
+    const last = rateLimitMap.get(id) || 0;
+    if (now - last < windowMs) {
+      return reply.code(429).send({ error: "TOO_MANY_REQUESTS", retry_after_ms: windowMs - (now - last) });
+    }
+    rateLimitMap.set(id, now);
+  };
+}
+
 // ─── Automation Engine ───────────────────────────────────────
 async function evaluateRules(venueId, triggerType, context = {}) {
   try {
@@ -365,6 +416,13 @@ async function evaluateRules(venueId, triggerType, context = {}) {
 
 // ─── Health ──────────────────────────────────────────────────
 app.get("/health", async () => ({ ok: true }));
+app.get("/config", async () => ({ feature_layer: FEATURE_LAYER }));
+
+app.get("/debug/dbpool", { preHandler: requireRole(ADMIN_ROLES) }, async () => ({
+  totalCount: pool.totalCount,
+  idleCount: pool.idleCount,
+  waitingCount: pool.waitingCount,
+}));
 
 // ─── Auth ────────────────────────────────────────────────────
 app.post("/auth/login", async (req, reply) => {
@@ -385,11 +443,26 @@ app.post("/auth/pin", async (req, reply) => {
   const v = await pool.query("SELECT * FROM venues WHERE pin=$1", [pin]);
   if (v.rowCount === 0) return reply.code(401).send({ error: "Bad pin" });
   const venue = v.rows[0];
-  const u = await pool.query(
-    "INSERT INTO users (role, venue_id) VALUES ($1,$2) RETURNING *",
-    [role, venue.id]
-  );
-  return { token: signToken(u.rows[0]), role, venue_id: venue.id };
+
+  // Reuse existing staff user for same venue + role (prevents user table bloat)
+  let user;
+  if (role !== "GUEST") {
+    const existing = await pool.query(
+      "SELECT * FROM users WHERE venue_id=$1 AND role=$2 AND email IS NULL ORDER BY id LIMIT 1",
+      [venue.id, role]
+    );
+    if (existing.rowCount > 0) {
+      user = existing.rows[0];
+    }
+  }
+  if (!user) {
+    const u = await pool.query(
+      "INSERT INTO users (role, venue_id) VALUES ($1,$2) RETURNING *",
+      [role, venue.id]
+    );
+    user = u.rows[0];
+  }
+  return { token: signToken(user), role, venue_id: venue.id };
 });
 
 // ─── Me ──────────────────────────────────────────────────────
@@ -520,11 +593,14 @@ app.post("/guest/checkout", { preHandler: requireAuth }, async (req, reply) => {
 });
 
 // ─── Wallet Top-up ──────────────────────────────────────────
-app.post("/wallet/topup", { preHandler: requireRole(["BAR", "SECURITY", "DOOR", ...ADMIN_ROLES]) }, async (req, reply) => {
+app.post("/wallet/topup", { preHandler: [requireRole(["BAR", "SECURITY", "DOOR", ...ADMIN_ROLES]), rateLimit("topup", 1000)] }, async (req, reply) => {
   const { amount, user_id, session_id, uid_tag } = req.body || {};
   const a = Number(amount);
   if (!a || a <= 0 || !Number.isFinite(a)) {
     return reply.code(400).send({ error: "amount must be a positive number" });
+  }
+  if (a > 5000) {
+    return reply.code(400).send({ error: "MAX_TOPUP_EXCEEDED", max: 5000 });
   }
   if (!user_id && !session_id && !uid_tag) {
     return reply.code(400).send({ error: "Provide one of: user_id, session_id, uid_tag" });
@@ -699,65 +775,125 @@ app.post("/orders", { preHandler: requireRole(["BAR"]) }, async (req, reply) => 
     return reply.code(400).send({ error: "venue_id and items required" });
   }
 
-  // Idempotency check: if key provided and order already exists, return it
+  // Idempotency check BEFORE transaction
   if (idempotency_key) {
     const existing = await pool.query("SELECT * FROM orders WHERE idempotency_key=$1", [idempotency_key]);
     if (existing.rowCount > 0) return existing.rows[0];
   }
 
-  let total = 0;
-  for (const item of items) {
-    total += (item.price || 0) * (item.qty || 1);
+  // Resolve user_id from guest session (outside tx — read-only)
+  let userId = null;
+  if (guest_session_id) {
+    const sess = await pool.query("SELECT user_id FROM venue_sessions WHERE id=$1", [guest_session_id]);
+    if (sess.rowCount > 0) userId = sess.rows[0].user_id;
   }
 
-  // Insert order
-  const o = await pool.query(
-    `INSERT INTO orders (venue_id, staff_user_id, guest_session_id, items, total, payment_method, idempotency_key)
-     VALUES ($1,$2,$3,$4,$5,$6,$7) RETURNING *`,
-    [venue_id, req.user.uid, guest_session_id || null, JSON.stringify(items), total, payment_method || "cash", idempotency_key || null]
-  );
-  const order = o.rows[0];
+  try {
+    const order = await withTx(async (client) => {
+      // 1) Resolve menu items server-side — do NOT trust client prices
+      const resolvedItems = [];
+      let total = 0;
+      for (const item of items) {
+        const mi = await client.query(
+          "SELECT id, name, price, inventory_item_id FROM menu_items WHERE id = $1 AND venue_id = $2 AND active = true",
+          [item.menu_item_id, venue_id]
+        );
+        if (mi.rowCount === 0) {
+          throw { statusCode: 400, error: "ITEM_NOT_FOUND", item: item.menu_item_id };
+        }
+        const menuItem = mi.rows[0];
+        const qty = item.qty || 1;
+        resolvedItems.push({
+          menu_item_id: menuItem.id,
+          inventory_item_id: menuItem.inventory_item_id,
+          name: menuItem.name,
+          price: parseFloat(menuItem.price),
+          qty
+        });
+        total += parseFloat(menuItem.price) * qty;
+      }
 
-  // Decrement inventory for each item
-  for (const item of items) {
-    if (item.inventory_item_id) {
-      const inv = await pool.query(
-        "UPDATE inventory SET qty = qty - $1, updated_at = now() WHERE id = $2 RETURNING *",
-        [item.qty || 1, item.inventory_item_id]
+      // 2) Lock user row + check wallet balance (if wallet payment)
+      if (userId && payment_method === "wallet") {
+        const userRow = await client.query(
+          "SELECT points FROM users WHERE id = $1 FOR UPDATE",
+          [userId]
+        );
+        if (userRow.rowCount === 0) {
+          throw { statusCode: 400, error: "USER_NOT_FOUND" };
+        }
+        if (parseFloat(userRow.rows[0].points) < total) {
+          throw { statusCode: 400, error: "INSUFFICIENT_FUNDS", balance: parseFloat(userRow.rows[0].points), required: total };
+        }
+      }
+
+      // 3) Decrement inventory with stock guards
+      for (const ri of resolvedItems) {
+        if (ri.inventory_item_id) {
+          const inv = await client.query(
+            "UPDATE inventory SET qty = qty - $1, updated_at = now() WHERE id = $2 AND qty >= $1 RETURNING *",
+            [ri.qty, ri.inventory_item_id]
+          );
+          if (inv.rowCount === 0) {
+            throw { statusCode: 400, error: "OUT_OF_STOCK", item: ri.name };
+          }
+          // LOW_STOCK log inside tx
+          if (inv.rows[0].qty <= inv.rows[0].low_threshold) {
+            await client.query(
+              "INSERT INTO logs (venue_id, type, payload) VALUES ($1, 'LOW_STOCK', $2)",
+              [venue_id, JSON.stringify({ item: inv.rows[0].item, qty: inv.rows[0].qty, low_threshold: inv.rows[0].low_threshold })]
+            );
+          }
+        }
+      }
+
+      // 4) Deduct wallet
+      if (userId && payment_method === "wallet") {
+        await client.query(
+          "UPDATE users SET points = points - $1 WHERE id = $2",
+          [total, userId]
+        );
+      }
+
+      // 5) Update venue session spend
+      if (guest_session_id) {
+        await client.query(
+          "UPDATE venue_sessions SET total_spend = total_spend + $1, interactions_count = interactions_count + 1 WHERE id = $2",
+          [total, guest_session_id]
+        );
+      }
+
+      // 6) Insert order
+      const o = await client.query(
+        `INSERT INTO orders (venue_id, staff_user_id, guest_session_id, items, total, payment_method, idempotency_key)
+         VALUES ($1,$2,$3,$4,$5,$6,$7) RETURNING *`,
+        [venue_id, req.user.uid, guest_session_id || null, JSON.stringify(resolvedItems), total, payment_method || "cash", idempotency_key || null]
       );
-      if (inv.rowCount > 0 && inv.rows[0].qty <= inv.rows[0].low_threshold) {
-        await pool.query(
-          "INSERT INTO logs (venue_id, type, payload) VALUES ($1,'LOW_STOCK',$2)",
-          [venue_id, { item: inv.rows[0].item, qty: inv.rows[0].qty, low_threshold: inv.rows[0].low_threshold }]
-        ).catch(() => {});
-        evaluateRules(venue_id, "inventory", { item: inv.rows[0].item, qty: inv.rows[0].qty }).catch(() => {});
+
+      // 7) Sale log
+      await client.query(
+        "INSERT INTO logs (venue_id, type, payload) VALUES ($1, 'SELL', $2)",
+        [venue_id, JSON.stringify({ order_id: o.rows[0].id, items: resolvedItems, total, payment_method: payment_method || "cash" })]
+      );
+
+      return o.rows[0];
+    });
+
+    // Fire-and-forget outside tx: XP award + rule evaluation
+    if (userId && payment_method === "wallet") {
+      awardXp(userId, order.total).catch(() => {});
+    }
+    for (const ri of order.items || []) {
+      if (ri.inventory_item_id) {
+        evaluateRules(venue_id, "inventory", { item: ri.name, qty: ri.qty }).catch(() => {});
       }
     }
+
+    return order;
+  } catch (e) {
+    if (e.statusCode) return reply.code(e.statusCode).send({ error: e.error, item: e.item, balance: e.balance, required: e.required });
+    throw e;
   }
-
-  // Deduct wallet if guest session linked
-  if (guest_session_id) {
-    await pool.query(
-      "UPDATE venue_sessions SET total_spend = total_spend + $1, interactions_count = interactions_count + 1 WHERE id = $2",
-      [total, guest_session_id]
-    );
-    const sess = await pool.query("SELECT user_id FROM venue_sessions WHERE id=$1", [guest_session_id]);
-    if (sess.rowCount > 0) {
-      await pool.query(
-        "UPDATE users SET points = points - $1 WHERE id = $2",
-        [total, sess.rows[0].user_id]
-      );
-      awardXp(sess.rows[0].user_id, total).catch(() => {});
-    }
-  }
-
-  // Log the sale
-  await pool.query(
-    "INSERT INTO logs (venue_id, type, payload) VALUES ($1,'SELL',$2)",
-    [venue_id, { order_id: order.id, items, total, payment_method: payment_method || "cash" }]
-  );
-
-  return order;
 });
 
 app.get("/orders/:venue_id", { preHandler: requireRole(["BAR", ...ADMIN_ROLES]) }, async (req) => {
@@ -855,39 +991,13 @@ app.put("/inventory/:venue_id/:id", { preHandler: requireRole(ADMIN_ROLES) }, as
 });
 
 // Legacy sell action (kept for backward compatibility)
-app.post("/actions/sell", { preHandler: requireRole(["BAR"]) }, async (req, reply) => {
-  const { venue_id, item, amount } = req.body || {};
-  const a = Number(amount || 1);
-
-  // Check stock before selling
-  const check = await pool.query(
-    "SELECT qty FROM inventory WHERE venue_id=$1 AND item=$2",
-    [venue_id, item]
-  );
-  if (check.rowCount === 0) return reply.code(400).send({ error: "No such item" });
-  if (check.rows[0].qty <= 0) return reply.code(400).send({ error: "Out of stock" });
-  if (check.rows[0].qty < a) return reply.code(400).send({ error: "Insufficient stock" });
-
-  const r = await pool.query(
-    "UPDATE inventory SET qty=qty-$1, updated_at=now() WHERE venue_id=$2 AND item=$3 RETURNING *",
-    [a, venue_id, item]
-  );
-  if (r.rowCount === 0) return reply.code(400).send({ error: "No such item" });
-
-  const inv = r.rows[0];
-  await pool.query("INSERT INTO logs (venue_id, type, payload) VALUES ($1,'SELL',$2)",
-    [venue_id, { item, amount: a, qty_after: inv.qty }]);
-
-  if (inv.qty <= inv.low_threshold) {
-    await pool.query("INSERT INTO logs (venue_id, type, payload) VALUES ($1,'LOW_STOCK',$2)",
-      [venue_id, { item, qty: inv.qty, low_threshold: inv.low_threshold }]);
-    await evaluateRules(venue_id, "inventory", { item, qty: inv.qty });
-  }
-  return { ok: true, inventory: inv };
+// Legacy endpoint — replaced by POST /orders (transactional)
+app.post("/actions/sell", { preHandler: requireAuth }, async (req, reply) => {
+  return reply.code(410).send({ error: "GONE", message: "Use POST /orders instead" });
 });
 
 // ─── Quests ──────────────────────────────────────────────────
-app.get("/quests/:venue_id", { preHandler: requireAuth }, async (req) => {
+app.get("/quests/:venue_id", { preHandler: [requireLayer(2), requireAuth] }, async (req) => {
   const now = new Date().toISOString();
   const r = await pool.query(
     `SELECT * FROM quests WHERE venue_id=$1 AND active=true
@@ -914,7 +1024,7 @@ app.get("/quests/:venue_id", { preHandler: requireAuth }, async (req) => {
   return quests;
 });
 
-app.post("/quests", { preHandler: requireRole(ADMIN_ROLES) }, async (req) => {
+app.post("/quests", { preHandler: [requireLayer(2), requireRole(ADMIN_ROLES)] }, async (req) => {
   const q = req.body || {};
   const r = await pool.query(
     `INSERT INTO quests (venue_id, title, description, conditions, xp_reward, nc_reward, min_level, starts_at, ends_at, max_completions, cooldown_hours)
@@ -925,7 +1035,7 @@ app.post("/quests", { preHandler: requireRole(ADMIN_ROLES) }, async (req) => {
   return r.rows[0];
 });
 
-app.put("/quests/:id", { preHandler: requireRole(ADMIN_ROLES) }, async (req, reply) => {
+app.put("/quests/:id", { preHandler: [requireLayer(2), requireRole(ADMIN_ROLES)] }, async (req, reply) => {
   const q = req.body || {};
   const r = await pool.query(
     `UPDATE quests SET title=COALESCE($1,title), description=COALESCE($2,description),
@@ -941,7 +1051,7 @@ app.put("/quests/:id", { preHandler: requireRole(ADMIN_ROLES) }, async (req, rep
   return r.rows[0];
 });
 
-app.post("/quests/:id/complete", { preHandler: requireAuth }, async (req, reply) => {
+app.post("/quests/:id/complete", { preHandler: [requireLayer(2), requireAuth] }, async (req, reply) => {
   const questId = req.params.id;
   const q = await pool.query("SELECT * FROM quests WHERE id=$1 AND active=true", [questId]);
   if (q.rowCount === 0) return reply.code(404).send({ error: "Quest not found" });
@@ -1006,7 +1116,7 @@ app.post("/quests/:id/complete", { preHandler: requireAuth }, async (req, reply)
 });
 
 // ─── Automation Rules ────────────────────────────────────────
-app.get("/rules/:venue_id", { preHandler: requireRole(ADMIN_ROLES) }, async (req) => {
+app.get("/rules/:venue_id", { preHandler: [requireLayer(2), requireRole(ADMIN_ROLES)] }, async (req) => {
   const r = await pool.query(
     "SELECT * FROM automation_rules WHERE venue_id=$1 ORDER BY created_at DESC",
     [req.params.venue_id]
@@ -1014,7 +1124,7 @@ app.get("/rules/:venue_id", { preHandler: requireRole(ADMIN_ROLES) }, async (req
   return r.rows;
 });
 
-app.post("/rules", { preHandler: requireRole(ADMIN_ROLES) }, async (req) => {
+app.post("/rules", { preHandler: [requireLayer(2), requireRole(ADMIN_ROLES)] }, async (req) => {
   const rule = req.body || {};
   const r = await pool.query(
     `INSERT INTO automation_rules (venue_id, name, trigger_type, conditions, actions)
@@ -1024,7 +1134,7 @@ app.post("/rules", { preHandler: requireRole(ADMIN_ROLES) }, async (req) => {
   return r.rows[0];
 });
 
-app.put("/rules/:id", { preHandler: requireRole(ADMIN_ROLES) }, async (req, reply) => {
+app.put("/rules/:id", { preHandler: [requireLayer(2), requireRole(ADMIN_ROLES)] }, async (req, reply) => {
   const rule = req.body || {};
   const r = await pool.query(
     `UPDATE automation_rules SET name=COALESCE($1,name), trigger_type=COALESCE($2,trigger_type),
@@ -1037,7 +1147,7 @@ app.put("/rules/:id", { preHandler: requireRole(ADMIN_ROLES) }, async (req, repl
   return r.rows[0];
 });
 
-app.delete("/rules/:id", { preHandler: requireRole(ADMIN_ROLES) }, async (req, reply) => {
+app.delete("/rules/:id", { preHandler: [requireLayer(2), requireRole(ADMIN_ROLES)] }, async (req, reply) => {
   const r = await pool.query("DELETE FROM automation_rules WHERE id=$1 RETURNING id", [req.params.id]);
   if (r.rowCount === 0) return reply.code(404).send({ error: "Not found" });
   return { ok: true };
@@ -1103,7 +1213,7 @@ app.post("/logs", { preHandler: requireAuth }, async (req) => {
 });
 
 // ─── Analytics ───────────────────────────────────────────────
-app.get("/analytics/:venue_id", { preHandler: requireRole(ADMIN_ROLES) }, async (req) => {
+app.get("/analytics/:venue_id", { preHandler: [requireLayer(3), requireRole(ADMIN_ROLES)] }, async (req) => {
   const venueId = req.params.venue_id;
 
   const activeSessions = await pool.query(
