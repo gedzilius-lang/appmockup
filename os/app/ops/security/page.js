@@ -2,6 +2,7 @@
 import { useEffect, useState } from "react";
 
 const API_BASE = "/api";
+const QUICK_AMOUNTS = [20, 50, 100, 200];
 
 const TYPE_COLORS = {
   SELL: { bg: "#06b6d420", color: "#06b6d4", border: "#06b6d440" },
@@ -41,6 +42,9 @@ export default function SecurityPage() {
   const [topupSessionId, setTopupSessionId] = useState("");
   const [topupAmount, setTopupAmount] = useState("");
   const [topupLoading, setTopupLoading] = useState(false);
+  const [topupSuccess, setTopupSuccess] = useState(null);
+  // Validation
+  const [topupErrors, setTopupErrors] = useState({});
 
   const token = typeof window !== "undefined" ? localStorage.getItem("pwl_token") : null;
   const venueId = typeof window !== "undefined" ? localStorage.getItem("pwl_venue_id") : null;
@@ -77,11 +81,23 @@ export default function SecurityPage() {
     await load();
   }
 
-  async function topUp() {
+  function validateTopup() {
+    const errors = {};
     const amt = Number(topupAmount);
-    if (!amt || amt <= 0) { showToast("Enter a valid amount", "error"); return; }
-    if (!topupUid.trim() && !topupSessionId.trim()) { showToast("Enter UID tag or Session ID", "error"); return; }
+    if (!amt || amt <= 0) errors.amount = true;
+    if (!topupUid.trim() && !topupSessionId.trim()) {
+      errors.uid = true;
+      errors.session = true;
+    }
+    setTopupErrors(errors);
+    return Object.keys(errors).length === 0;
+  }
+
+  async function topUp() {
+    if (!validateTopup()) return;
+    const amt = Number(topupAmount);
     setTopupLoading(true);
+    setTopupSuccess(null);
     try {
       const body = { amount: amt };
       if (topupSessionId.trim()) body.session_id = Number(topupSessionId);
@@ -92,14 +108,28 @@ export default function SecurityPage() {
         body: JSON.stringify(body),
       });
       const j = await res.json();
-      if (!res.ok) { showToast(j.error || "Top-up failed", "error"); return; }
-      showToast(`+${amt} NC added. New balance: ${j.new_balance} NC`, "success");
+      if (!res.ok) {
+        if (res.status === 429) {
+          showToast("Slow down — 1 top-up per second", "error");
+        } else {
+          showToast(j.error || "Top-up failed", "error");
+        }
+        return;
+      }
+      setTopupSuccess({ amount: amt, balance: j.new_balance });
+      showToast(`Top-up complete: +${amt} NC → Balance ${j.new_balance} NC`, "success");
       setTopupAmount("");
       setTopupUid("");
       setTopupSessionId("");
+      setTopupErrors({});
       await load();
     } catch { showToast("Network error", "error"); }
     finally { setTopupLoading(false); }
+  }
+
+  function selectQuickAmount(amt) {
+    setTopupAmount(String(amt));
+    setTopupErrors(prev => ({ ...prev, amount: false }));
   }
 
   useEffect(() => { load(); }, []);
@@ -109,68 +139,93 @@ export default function SecurityPage() {
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "1rem" }}>
         <h1 style={{ margin: 0, fontSize: "1.5rem", fontWeight: 800 }}>Security</h1>
         <div style={{ display: "flex", gap: "0.5rem" }}>
-          <button onClick={load} className="btn-secondary" style={{ padding: "0.4rem 0.75rem", fontSize: "0.8rem" }}>Refresh</button>
-          <button onClick={() => { window.location.href = "/ops"; }} style={{ padding: "0.4rem 0.75rem", fontSize: "0.8rem" }}>Logout</button>
+          <button onClick={load} className="btn-secondary btn-press" style={{ padding: "0.4rem 0.75rem", fontSize: "0.8rem" }}>Refresh</button>
+          <button onClick={() => { window.location.href = "/ops"; }} className="btn-press" style={{ padding: "0.4rem 0.75rem", fontSize: "0.8rem" }}>Logout</button>
         </div>
       </div>
 
       {status && <div className="card" style={{ marginBottom: "1rem", color: "#f97316" }}>{status}</div>}
 
-      {/* Wallet Top-up */}
+      {/* Wallet Top-up Panel */}
       <div className="card" style={{
         marginBottom: "1.25rem",
-        border: "1px solid #a855f730",
-        boxShadow: "0 0 12px #a855f710",
+        border: "1px solid #a855f740",
+        boxShadow: "0 0 20px #a855f715",
+        background: "linear-gradient(135deg, #14141f 0%, #1a1028 100%)",
       }}>
-        <h2 style={{ margin: "0 0 0.5rem", fontSize: "0.95rem", fontWeight: 700, color: "#a855f7" }}>
-          Top Up Wallet
+        <h2 style={{ margin: "0 0 0.75rem", fontSize: "1rem", fontWeight: 800, color: "#a855f7", display: "flex", alignItems: "center", gap: "0.5rem" }}>
+          <span style={{ fontSize: "1.2rem" }}>💳</span> Top Up Wallet
         </h2>
-        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "0.5rem", marginBottom: "0.5rem" }}>
+
+        {/* ID inputs */}
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "0.5rem", marginBottom: "0.75rem" }}>
           <input
             placeholder="UID tag"
             value={topupUid}
-            onChange={e => setTopupUid(e.target.value)}
+            onChange={e => { setTopupUid(e.target.value); setTopupErrors(prev => ({ ...prev, uid: false, session: false })); }}
+            className={topupErrors.uid ? "input-error" : ""}
             style={{ fontSize: "0.85rem", padding: "0.5rem 0.65rem" }}
           />
           <input
             placeholder="Session ID"
             value={topupSessionId}
-            onChange={e => setTopupSessionId(e.target.value)}
+            onChange={e => { setTopupSessionId(e.target.value); setTopupErrors(prev => ({ ...prev, uid: false, session: false })); }}
+            className={topupErrors.session ? "input-error" : ""}
             style={{ fontSize: "0.85rem", padding: "0.5rem 0.65rem" }}
           />
         </div>
+
+        {/* Quick amount chips */}
+        <div style={{ display: "flex", gap: "0.4rem", flexWrap: "wrap", marginBottom: "0.75rem" }}>
+          {QUICK_AMOUNTS.map(amt => (
+            <button
+              key={amt}
+              className="chip"
+              onClick={() => selectQuickAmount(amt)}
+              style={topupAmount === String(amt) ? { borderColor: "#a855f7", background: "#a855f720", color: "#a855f7" } : {}}
+            >
+              +{amt}
+            </button>
+          ))}
+        </div>
+
+        {/* Amount + submit */}
         <div style={{ display: "flex", gap: "0.5rem" }}>
           <input
             type="number"
             placeholder="Amount (NC)"
             min="1"
             value={topupAmount}
-            onChange={e => setTopupAmount(e.target.value)}
+            onChange={e => { setTopupAmount(e.target.value); setTopupErrors(prev => ({ ...prev, amount: false })); }}
             onKeyDown={e => e.key === "Enter" && topUp()}
+            className={topupErrors.amount ? "input-error" : ""}
             style={{ flex: 1, fontSize: "1rem", fontWeight: 700, padding: "0.5rem 0.65rem" }}
           />
           <button
             onClick={topUp}
             disabled={topupLoading}
-            style={{
-              padding: "0.5rem 1.25rem",
-              fontSize: "0.85rem",
-              fontWeight: 700,
-              background: "#a855f7",
-              color: "#fff",
-              border: "none",
-              borderRadius: "0.5rem",
-              cursor: topupLoading ? "wait" : "pointer",
-              transition: "background 0.15s, transform 0.1s",
-              boxShadow: "0 0 8px #a855f740",
-            }}
-            onPointerDown={e => { e.currentTarget.style.transform = "scale(0.96)"; }}
-            onPointerUp={e => { e.currentTarget.style.transform = "scale(1)"; }}
-            onPointerLeave={e => { e.currentTarget.style.transform = "scale(1)"; }}
+            className="btn-confirm btn-press"
+            style={{ width: "auto", padding: "0.5rem 1.5rem", fontSize: "0.9rem" }}
           >
             {topupLoading ? "..." : "Top Up"}
           </button>
         </div>
+
+        {/* Success message */}
+        {topupSuccess && (
+          <div style={{
+            marginTop: "0.75rem",
+            padding: "0.5rem 0.75rem",
+            borderRadius: "0.5rem",
+            background: "#22c55e15",
+            border: "1px solid #22c55e40",
+            color: "#22c55e",
+            fontSize: "0.85rem",
+            fontWeight: 600,
+          }}>
+            Top-up complete: +{topupSuccess.amount} NC → Balance {topupSuccess.balance} NC
+          </div>
+        )}
       </div>
 
       {/* Incident form */}
@@ -184,7 +239,7 @@ export default function SecurityPage() {
             rows={2}
             style={{ flex: 1, resize: "vertical" }}
           />
-          <button className="btn-danger" onClick={addIncident} style={{ alignSelf: "flex-end" }}>Submit</button>
+          <button className="btn-danger btn-press" onClick={addIncident} style={{ alignSelf: "flex-end" }}>Submit</button>
         </div>
       </div>
 
