@@ -25,6 +25,56 @@ created new menu items, the OS bar POS could receive cached responses missing th
 ### Remaining
 - User browser test needed: create item in admin → refresh bar POS → item appears
 
+## P0.2 — Venue PIN display (deployed 2026-02-18)
+- PIN masked by default with bullet chars, Show/Hide toggle + Copy button
+- Role-guarded: GET /venues requires ADMIN_ROLES (already enforced)
+
+## P0.3 — Admin mobile responsive (deployed 2026-02-18)
+- Viewport meta tag (`width=device-width, initial-scale=1, maximum-scale=1`)
+- Input font-size 16px (prevents iOS auto-zoom)
+- `table-scroll` class for horizontal scroll on narrow screens
+- `form-grid` responsive class (stacks on mobile)
+- Mobile breakpoint: smaller card padding, compact table cells
+
+## P1.1 — NFC scan button (deployed 2026-02-18)
+- `os/app/lib/nfc.js` — Web NFC capability detection + single-tag scan
+- NFC button on /ops/security (top-up UID input) and /guest (check-in UID input)
+- Graceful fallback: button hidden when Web NFC unavailable, info note shown
+
+## P1.2 — UID history lookup (deployed 2026-02-18)
+- `GET /uid/:uid_tag/history` — sessions, active status, balance (SECURITY/DOOR/ADMIN)
+- Privacy: non-MAIN_ADMIN only sees same-venue data
+- Security page: cyan "Lookup UID" panel with NFC scan, IN/OUT badge, visits table
+- Index: `venue_sessions(uid_tag, started_at DESC)`
+
+## P1.3 — Runner full stock + progress bars (deployed 2026-02-18)
+- `inventory.max_qty` nullable column (idempotent ALTER)
+- Seeded max_qty from original inventory seed quantities
+- Runner tabs: "Alerts" (low-stock logs) + "All Stock" (all items with progress bars)
+- Progress bar: purple fill on black, orange when low, red when empty
+- Threshold marker on each bar, % label
+
+## P2 — Guest Layer 2 profile (deployed 2026-02-18, GATED OFF)
+- Profile UI on /guest: Stats (level badge, XP bar, wallet, visits), Quests, History tabs
+- Only renders when `feature_layer >= 2` (currently 1 in production)
+- Layer 1 guest page unchanged
+
+## All Deployed Commits (2026-02-18)
+| Commit | Description |
+|--------|-------------|
+| facc69e | P0.1: proxy cache fix |
+| e03bdb6 | P0.2: venue PIN display |
+| 209f742 | P0.3: admin mobile responsive |
+| 5517651 | P1.1: NFC scan button |
+| a8cfb62 | P1.2: UID history lookup |
+| bb4c106 | P1.3: runner stock + progress bars |
+| a9661ea | P2: guest Layer 2 profile (gated) |
+
+## Next Steps
+1. **User browser testing** needed for all changes above
+2. Cross-cutting: NGINX hardening (gzip, security headers, static cache)
+3. Cross-cutting: DB integrity verify checklist
+
 ## Services (all running on VPS)
 - **API** — Fastify on port 4000 (server.js)
 - **OS** — Next.js 14 on port 3000 (os/)
