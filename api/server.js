@@ -188,6 +188,15 @@ async function initDb() {
     );
   `);
 
+  // Add idempotency_key column if missing (idempotent migration)
+  await pool.query(`
+    DO $$ BEGIN
+      ALTER TABLE orders ADD COLUMN IF NOT EXISTS idempotency_key text;
+    EXCEPTION WHEN others THEN NULL;
+    END $$;
+  `);
+  await pool.query(`CREATE UNIQUE INDEX IF NOT EXISTS idx_orders_idempotency ON orders(idempotency_key) WHERE idempotency_key IS NOT NULL`);
+
   // Performance indexes (idempotent)
   await pool.query(`
     CREATE INDEX IF NOT EXISTS idx_venue_sessions_active ON venue_sessions(venue_id) WHERE ended_at IS NULL;
@@ -212,6 +221,73 @@ async function initDb() {
     );
     app.log.info("Seeded MAIN_ADMIN");
   }
+
+  // Seed Supermarket venue + inventory + menu (idempotent)
+  const sv = await pool.query("SELECT id FROM venues WHERE name='Supermarket'");
+  let supermarketId;
+  if (sv.rowCount === 0) {
+    const ins = await pool.query(
+      "INSERT INTO venues (name, city, pin, capacity) VALUES ('Supermarket','Zurich','1234',200) RETURNING id"
+    );
+    supermarketId = ins.rows[0].id;
+    app.log.info("Seeded venue: Supermarket");
+  } else {
+    supermarketId = sv.rows[0].id;
+  }
+
+  // Seed inventory items (idempotent by venue_id + item name)
+  const seedInventory = [
+    { item: "Beer", qty: 100, low_threshold: 10 },
+    { item: "Wine", qty: 50, low_threshold: 8 },
+    { item: "Vodka", qty: 40, low_threshold: 5 },
+    { item: "Gin", qty: 40, low_threshold: 5 },
+    { item: "Rum", qty: 30, low_threshold: 5 },
+    { item: "Whiskey", qty: 30, low_threshold: 5 },
+    { item: "Tequila", qty: 25, low_threshold: 5 },
+    { item: "Juice", qty: 60, low_threshold: 10 },
+    { item: "Soda", qty: 80, low_threshold: 15 },
+    { item: "Water", qty: 120, low_threshold: 20 },
+    { item: "Energy Drink", qty: 40, low_threshold: 8 },
+    { item: "Tonic", qty: 50, low_threshold: 10 },
+  ];
+  for (const si of seedInventory) {
+    const exists = await pool.query("SELECT id FROM inventory WHERE venue_id=$1 AND item=$2", [supermarketId, si.item]);
+    if (exists.rowCount === 0) {
+      await pool.query(
+        "INSERT INTO inventory (venue_id, item, qty, low_threshold) VALUES ($1,$2,$3,$4)",
+        [supermarketId, si.item, si.qty, si.low_threshold]
+      );
+    }
+  }
+
+  // Seed menu items (idempotent by venue_id + name)
+  const seedMenu = [
+    { name: "Beer", category: "Drinks", price: 5, icon: "🍺" },
+    { name: "Wine", category: "Drinks", price: 8, icon: "🍷" },
+    { name: "Vodka Shot", category: "Shots", price: 6, icon: "🥃" },
+    { name: "Gin Tonic", category: "Cocktails", price: 12, icon: "🍸" },
+    { name: "Rum Cola", category: "Cocktails", price: 10, icon: "🥤" },
+    { name: "Whiskey Sour", category: "Cocktails", price: 14, icon: "🥃" },
+    { name: "Tequila Shot", category: "Shots", price: 7, icon: "🌶️" },
+    { name: "Juice", category: "Soft", price: 4, icon: "🧃" },
+    { name: "Soda", category: "Soft", price: 3, icon: "🥤" },
+    { name: "Water", category: "Soft", price: 2, icon: "💧" },
+    { name: "Energy Drink", category: "Soft", price: 5, icon: "⚡" },
+  ];
+  for (let i = 0; i < seedMenu.length; i++) {
+    const sm = seedMenu[i];
+    const exists = await pool.query("SELECT id FROM menu_items WHERE venue_id=$1 AND name=$2", [supermarketId, sm.name]);
+    if (exists.rowCount === 0) {
+      // Link to inventory if matching
+      const inv = await pool.query("SELECT id FROM inventory WHERE venue_id=$1 AND item=$2", [supermarketId, sm.name.replace(/ Shot| Tonic| Cola| Sour/g, "").trim()]);
+      const invId = inv.rowCount > 0 ? inv.rows[0].id : null;
+      await pool.query(
+        "INSERT INTO menu_items (venue_id, name, category, price, icon, inventory_item_id, display_order, active) VALUES ($1,$2,$3,$4,$5,$6,$7,true)",
+        [supermarketId, sm.name, sm.category, sm.price, sm.icon, invId, i]
+      );
+    }
+  }
+  app.log.info("Supermarket seed check complete");
 }
 
 // ─── Auth Middleware ─────────────────────────────────────────
@@ -443,6 +519,72 @@ app.post("/guest/checkout", { preHandler: requireAuth }, async (req, reply) => {
   return { ok: true, session: r.rows[0] };
 });
 
+// ─── Wallet Top-up ──────────────────────────────────────────
+app.post("/wallet/topup", { preHandler: requireRole(["BAR", "SECURITY", "DOOR", ...ADMIN_ROLES]) }, async (req, reply) => {
+  const { amount, user_id, session_id, uid_tag } = req.body || {};
+  const a = Number(amount);
+  if (!a || a <= 0 || !Number.isFinite(a)) {
+    return reply.code(400).send({ error: "amount must be a positive number" });
+  }
+  if (!user_id && !session_id && !uid_tag) {
+    return reply.code(400).send({ error: "Provide one of: user_id, session_id, uid_tag" });
+  }
+
+  const venueId = req.user.venue_id;
+  let targetUserId = null;
+
+  // Resolve target: session_id > uid_tag > user_id
+  if (session_id) {
+    const s = await pool.query("SELECT user_id FROM venue_sessions WHERE id=$1", [session_id]);
+    if (s.rowCount === 0) return reply.code(404).send({ error: "Session not found" });
+    targetUserId = s.rows[0].user_id;
+    if (user_id && user_id !== targetUserId) {
+      app.log.warn({ session_id, user_id, resolved: targetUserId }, "topup: session_id resolved to different user_id");
+    }
+  } else if (uid_tag) {
+    // Try active session first, then most recent
+    let s = await pool.query(
+      "SELECT user_id FROM venue_sessions WHERE uid_tag=$1 AND ended_at IS NULL ORDER BY started_at DESC LIMIT 1",
+      [uid_tag]
+    );
+    if (s.rowCount === 0) {
+      s = await pool.query(
+        "SELECT user_id FROM venue_sessions WHERE uid_tag=$1 ORDER BY started_at DESC LIMIT 1",
+        [uid_tag]
+      );
+    }
+    if (s.rowCount === 0) return reply.code(404).send({ error: "No session found for uid_tag" });
+    targetUserId = s.rows[0].user_id;
+  } else {
+    targetUserId = user_id;
+  }
+
+  // Atomic: update balance + log in transaction
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
+    const r = await client.query(
+      "UPDATE users SET points = points + $1 WHERE id = $2 RETURNING points",
+      [a, targetUserId]
+    );
+    if (r.rowCount === 0) {
+      await client.query("ROLLBACK");
+      return reply.code(404).send({ error: "User not found" });
+    }
+    await client.query(
+      "INSERT INTO logs (venue_id, type, payload) VALUES ($1,'TOPUP',$2)",
+      [venueId, { user_id: targetUserId, amount: a, staff_id: req.user.uid, new_balance: r.rows[0].points }]
+    );
+    await client.query("COMMIT");
+    return { ok: true, new_balance: r.rows[0].points, amount: a, user_id: targetUserId, venue_id: venueId };
+  } catch (err) {
+    await client.query("ROLLBACK");
+    throw err;
+  } finally {
+    client.release();
+  }
+});
+
 // ─── Venues ──────────────────────────────────────────────────
 app.get("/venues", { preHandler: requireRole(ADMIN_ROLES) }, async () => {
   const r = await pool.query("SELECT * FROM venues ORDER BY id DESC");
@@ -562,9 +704,15 @@ app.delete("/menu/:id", { preHandler: requireRole(ADMIN_ROLES) }, async (req, re
 
 // ─── Orders ──────────────────────────────────────────────────
 app.post("/orders", { preHandler: requireRole(["BAR"]) }, async (req, reply) => {
-  const { venue_id, items, payment_method, guest_session_id } = req.body || {};
+  const { venue_id, items, payment_method, guest_session_id, idempotency_key } = req.body || {};
   if (!venue_id || !items || !Array.isArray(items) || items.length === 0) {
     return reply.code(400).send({ error: "venue_id and items required" });
+  }
+
+  // Idempotency check: if key provided and order already exists, return it
+  if (idempotency_key) {
+    const existing = await pool.query("SELECT * FROM orders WHERE idempotency_key=$1", [idempotency_key]);
+    if (existing.rowCount > 0) return existing.rows[0];
   }
 
   let total = 0;
@@ -572,52 +720,81 @@ app.post("/orders", { preHandler: requireRole(["BAR"]) }, async (req, reply) => 
     total += (item.price || 0) * (item.qty || 1);
   }
 
-  const o = await pool.query(
-    `INSERT INTO orders (venue_id, staff_user_id, guest_session_id, items, total, payment_method)
-     VALUES ($1,$2,$3,$4,$5,$6) RETURNING *`,
-    [venue_id, req.user.uid, guest_session_id || null, JSON.stringify(items), total, payment_method || "cash"]
-  );
+  // Atomic transaction: order + inventory + wallet + logs
+  const client = await pool.connect();
+  let order;
+  const lowStockAlerts = [];
+  try {
+    await client.query("BEGIN");
 
-  // Decrement inventory for each item
-  for (const item of items) {
-    if (item.inventory_item_id) {
-      const inv = await pool.query(
-        "UPDATE inventory SET qty = qty - $1, updated_at = now() WHERE id = $2 RETURNING *",
-        [item.qty || 1, item.inventory_item_id]
-      );
-      if (inv.rowCount > 0 && inv.rows[0].qty <= inv.rows[0].low_threshold) {
-        await pool.query(
-          "INSERT INTO logs (venue_id, type, payload) VALUES ($1,'LOW_STOCK',$2)",
-          [venue_id, { item: inv.rows[0].item, qty: inv.rows[0].qty, low_threshold: inv.rows[0].low_threshold }]
+    // 1. Insert order
+    const o = await client.query(
+      `INSERT INTO orders (venue_id, staff_user_id, guest_session_id, items, total, payment_method, idempotency_key)
+       VALUES ($1,$2,$3,$4,$5,$6,$7) RETURNING *`,
+      [venue_id, req.user.uid, guest_session_id || null, JSON.stringify(items), total, payment_method || "cash", idempotency_key || null]
+    );
+    order = o.rows[0];
+
+    // 2. Decrement inventory for each item
+    for (const item of items) {
+      if (item.inventory_item_id) {
+        const inv = await client.query(
+          "UPDATE inventory SET qty = qty - $1, updated_at = now() WHERE id = $2 RETURNING *",
+          [item.qty || 1, item.inventory_item_id]
         );
-        await evaluateRules(venue_id, "inventory", { item: inv.rows[0].item, qty: inv.rows[0].qty });
+        if (inv.rowCount > 0 && inv.rows[0].qty <= inv.rows[0].low_threshold) {
+          lowStockAlerts.push(inv.rows[0]);
+        }
       }
     }
-  }
 
-  // Log the sale
-  await pool.query(
-    "INSERT INTO logs (venue_id, type, payload) VALUES ($1,'SELL',$2)",
-    [venue_id, { order_id: o.rows[0].id, items, total, payment_method }]
-  );
+    // 3. Deduct wallet if guest session linked
+    if (guest_session_id) {
+      await client.query(
+        "UPDATE venue_sessions SET total_spend = total_spend + $1, interactions_count = interactions_count + 1 WHERE id = $2",
+        [total, guest_session_id]
+      );
+      const sess = await client.query("SELECT user_id FROM venue_sessions WHERE id=$1", [guest_session_id]);
+      if (sess.rowCount > 0) {
+        await client.query(
+          "UPDATE users SET points = points - $1 WHERE id = $2",
+          [total, sess.rows[0].user_id]
+        );
+      }
+    }
 
-  // Update session spend if guest linked
-  if (guest_session_id) {
-    await pool.query(
-      "UPDATE venue_sessions SET total_spend = total_spend + $1, interactions_count = interactions_count + 1 WHERE id = $2",
-      [total, guest_session_id]
+    // 4. Log the sale
+    await client.query(
+      "INSERT INTO logs (venue_id, type, payload) VALUES ($1,'SELL',$2)",
+      [venue_id, { order_id: order.id, items, total, payment_method: payment_method || "cash" }]
     );
+
+    await client.query("COMMIT");
+  } catch (err) {
+    await client.query("ROLLBACK");
+    throw err;
+  } finally {
+    client.release();
   }
 
-  // Award XP to guest if session linked (1 XP per NC spent)
+  // Post-commit: low stock alerts + rule evaluation (non-transactional, best-effort)
+  for (const inv of lowStockAlerts) {
+    await pool.query(
+      "INSERT INTO logs (venue_id, type, payload) VALUES ($1,'LOW_STOCK',$2)",
+      [venue_id, { item: inv.item, qty: inv.qty, low_threshold: inv.low_threshold }]
+    ).catch(() => {});
+    evaluateRules(venue_id, "inventory", { item: inv.item, qty: inv.qty }).catch(() => {});
+  }
+
+  // Post-commit: award XP (best-effort, outside txn)
   if (guest_session_id) {
     const sess = await pool.query("SELECT user_id FROM venue_sessions WHERE id=$1", [guest_session_id]);
     if (sess.rowCount > 0) {
-      await awardXp(sess.rows[0].user_id, total);
+      awardXp(sess.rows[0].user_id, total).catch(() => {});
     }
   }
 
-  return o.rows[0];
+  return order;
 });
 
 app.get("/orders/:venue_id", { preHandler: requireRole(["BAR", ...ADMIN_ROLES]) }, async (req) => {
