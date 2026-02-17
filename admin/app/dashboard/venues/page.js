@@ -9,6 +9,7 @@ export default function VenuesPage() {
   const [form, setForm] = useState({ name: "", city: "Zurich", pin: "", capacity: "" });
   const [saving, setSaving] = useState(false);
   const [toast, setToast] = useState(null);
+  const [revealedPins, setRevealedPins] = useState({});
 
   function showToast(message, type = "success") {
     setToast({ message, type });
@@ -118,7 +119,19 @@ export default function VenuesPage() {
               <tr key={v.id}>
                 <td style={{ fontWeight: 600 }}>{v.name}</td>
                 <td>{v.city}</td>
-                <td style={{ fontFamily: "monospace", color: "#64748b" }}>{"*".repeat(Math.max(v.pin?.length || 4, 4))}</td>
+                <td style={{ fontFamily: "monospace", color: "#64748b", whiteSpace: "nowrap" }}>
+                  <span>{revealedPins[v.id] ? v.pin : "•".repeat(v.pin?.length || 4)}</span>
+                  <button
+                    onClick={() => setRevealedPins(p => ({ ...p, [v.id]: !p[v.id] }))}
+                    title={revealedPins[v.id] ? "Hide PIN" : "Reveal PIN"}
+                    style={{ marginLeft: "0.4rem", padding: "0.15rem 0.4rem", fontSize: "0.7rem", background: "transparent", border: "1px solid #334155", borderRadius: "4px", color: "#94a3b8", cursor: "pointer" }}
+                  >{revealedPins[v.id] ? "Hide" : "Show"}</button>
+                  <button
+                    onClick={() => { navigator.clipboard.writeText(v.pin); showToast("PIN copied"); }}
+                    title="Copy PIN"
+                    style={{ marginLeft: "0.25rem", padding: "0.15rem 0.4rem", fontSize: "0.7rem", background: "transparent", border: "1px solid #334155", borderRadius: "4px", color: "#94a3b8", cursor: "pointer" }}
+                  >Copy</button>
+                </td>
                 <td>{v.capacity || "—"}</td>
                 <td style={{ color: "#64748b", fontSize: "0.8rem" }}>{new Date(v.created_at).toLocaleDateString()}</td>
                 <td>
