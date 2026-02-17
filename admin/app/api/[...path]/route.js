@@ -1,5 +1,8 @@
 import { NextResponse } from "next/server";
 
+export const dynamic = "force-dynamic";
+export const fetchCache = "force-no-store";
+
 const API_INTERNAL = process.env.INTERNAL_API_URL || process.env.API_BASE_URL || "https://api.peoplewelike.club";
 
 async function proxy(request, { params }) {
@@ -10,7 +13,7 @@ async function proxy(request, { params }) {
   if (auth) headers["Authorization"] = auth;
 
   try {
-    const opts = { method: request.method, headers };
+    const opts = { method: request.method, headers, cache: "no-store" };
     if (request.method !== "GET" && request.method !== "HEAD") {
       opts.body = await request.text();
     }
@@ -18,7 +21,7 @@ async function proxy(request, { params }) {
     const data = await res.text();
     return new NextResponse(data, {
       status: res.status,
-      headers: { "Content-Type": "application/json" },
+      headers: { "Content-Type": "application/json", "Cache-Control": "no-store" },
     });
   } catch (err) {
     return NextResponse.json({ error: "API unreachable" }, { status: 502 });
