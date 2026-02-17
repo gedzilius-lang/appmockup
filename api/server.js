@@ -233,6 +233,7 @@ async function initDb() {
     CREATE INDEX IF NOT EXISTS idx_notifications_user ON notifications(target_user_id) WHERE read = false;
     CREATE INDEX IF NOT EXISTS idx_menu_items_venue ON menu_items(venue_id) WHERE active = true;
     CREATE INDEX IF NOT EXISTS idx_quests_venue ON quests(venue_id) WHERE active = true;
+    CREATE INDEX IF NOT EXISTS idx_venue_sessions_uid ON venue_sessions(uid_tag, started_at DESC) WHERE uid_tag IS NOT NULL;
   `);
 
   // Seed main admin once
@@ -649,6 +650,47 @@ app.post("/wallet/topup", { preHandler: [requireRole(["BAR", "SECURITY", "DOOR",
     [venueId, { user_id: targetUserId, amount: a, staff_id: req.user.uid, new_balance: newBalance }]
   );
   return { ok: true, new_balance: newBalance, amount: a, user_id: targetUserId, venue_id: venueId };
+});
+
+// ─── UID History ─────────────────────────────────────────────
+app.get("/uid/:uid_tag/history", {
+  preHandler: requireRole(["SECURITY", "DOOR", ...ADMIN_ROLES])
+}, async (req) => {
+  const uid = req.params.uid_tag;
+  const userVenue = req.user.venue_id;
+  const isMainAdmin = req.user.role === "MAIN_ADMIN";
+
+  // Sessions for this UID (same venue unless MAIN_ADMIN)
+  const sessionsQ = isMainAdmin
+    ? await pool.query(
+        `SELECT vs.*, v.name as venue_name FROM venue_sessions vs
+         LEFT JOIN venues v ON v.id = vs.venue_id
+         WHERE vs.uid_tag = $1 ORDER BY vs.started_at DESC LIMIT 10`, [uid])
+    : await pool.query(
+        `SELECT vs.*, v.name as venue_name FROM venue_sessions vs
+         LEFT JOIN venues v ON v.id = vs.venue_id
+         WHERE vs.uid_tag = $1 AND vs.venue_id = $2 ORDER BY vs.started_at DESC LIMIT 10`, [uid, userVenue]);
+
+  // Current active session
+  const activeQ = await pool.query(
+    `SELECT vs.*, v.name as venue_name FROM venue_sessions vs
+     LEFT JOIN venues v ON v.id = vs.venue_id
+     WHERE vs.uid_tag = $1 AND vs.ended_at IS NULL LIMIT 1`, [uid]);
+
+  // Get user balance if linked
+  let balance = null;
+  if (sessionsQ.rows.length > 0) {
+    const userId = sessionsQ.rows[0].user_id;
+    const uq = await pool.query("SELECT points FROM users WHERE id=$1", [userId]);
+    if (uq.rows.length > 0) balance = uq.rows[0].points;
+  }
+
+  return {
+    uid_tag: uid,
+    active_session: activeQ.rows[0] || null,
+    sessions: sessionsQ.rows,
+    balance,
+  };
 });
 
 // ─── Venues ──────────────────────────────────────────────────

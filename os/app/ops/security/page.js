@@ -50,6 +50,11 @@ export default function SecurityPage() {
   const [scanning, setScanning] = useState(false);
   const [scanCtrl, setScanCtrl] = useState(null);
   const nfcAvailable = typeof window !== "undefined" && isNfcSupported();
+  // UID Lookup
+  const [lookupUid, setLookupUid] = useState("");
+  const [lookupResult, setLookupResult] = useState(null);
+  const [lookupLoading, setLookupLoading] = useState(false);
+  const [lookupScanning, setLookupScanning] = useState(false);
 
   function startNfcScan() {
     if (scanning && scanCtrl) { scanCtrl.abort(); setScanning(false); return; }
@@ -101,6 +106,29 @@ export default function SecurityPage() {
     setIncident("");
     showToast("Incident logged", "success");
     await load();
+  }
+
+  async function lookupUidHistory() {
+    if (!lookupUid.trim()) return;
+    setLookupLoading(true);
+    try {
+      const res = await fetch(`${API_BASE}/uid/${encodeURIComponent(lookupUid.trim())}/history`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      const j = await res.json();
+      if (!res.ok) { showToast(j.error || "Lookup failed", "error"); setLookupResult(null); return; }
+      setLookupResult(j);
+    } catch { showToast("Network error", "error"); }
+    finally { setLookupLoading(false); }
+  }
+
+  function startLookupNfc() {
+    if (lookupScanning) return;
+    setLookupScanning(true);
+    scanUidOnce({
+      onUid: (u) => { setLookupUid(u); setLookupScanning(false); showToast("NFC scan successful", "success"); },
+      onError: (err) => { setLookupScanning(false); showToast(err.message || "NFC failed", "error"); },
+    });
   }
 
   function validateTopup() {
@@ -263,6 +291,88 @@ export default function SecurityPage() {
             fontWeight: 600,
           }}>
             Top-up complete: +{topupSuccess.amount} NC → Balance {topupSuccess.balance} NC
+          </div>
+        )}
+      </div>
+
+      {/* UID Lookup Panel */}
+      <div className="card" style={{ marginBottom: "1.25rem", border: "1px solid #06b6d440", background: "linear-gradient(135deg, #14141f 0%, #0f1a28 100%)" }}>
+        <h2 style={{ margin: "0 0 0.75rem", fontSize: "1rem", fontWeight: 800, color: "#06b6d4", display: "flex", alignItems: "center", gap: "0.5rem" }}>
+          <span style={{ fontSize: "1.2rem" }}>🔍</span> Lookup UID
+        </h2>
+        <div style={{ display: "flex", gap: "0.35rem", marginBottom: "0.5rem" }}>
+          <input
+            placeholder="Enter UID tag"
+            value={lookupUid}
+            onChange={e => setLookupUid(e.target.value)}
+            onKeyDown={e => e.key === "Enter" && lookupUidHistory()}
+            style={{ flex: 1, fontSize: "0.85rem", padding: "0.5rem 0.65rem" }}
+          />
+          {nfcAvailable && (
+            <button
+              onClick={startLookupNfc}
+              className={`btn-press ${lookupScanning ? "btn-danger" : "btn-secondary"}`}
+              style={{ padding: "0.4rem 0.6rem", fontSize: "0.75rem", whiteSpace: "nowrap" }}
+            >{lookupScanning ? "Stop" : "📡 NFC"}</button>
+          )}
+          <button
+            onClick={lookupUidHistory}
+            disabled={lookupLoading || !lookupUid.trim()}
+            className="btn-primary btn-press"
+            style={{ padding: "0.4rem 0.8rem", fontSize: "0.85rem" }}
+          >{lookupLoading ? "..." : "Lookup"}</button>
+        </div>
+
+        {lookupResult && (
+          <div style={{ marginTop: "0.5rem" }}>
+            {/* Active status */}
+            <div style={{ display: "flex", alignItems: "center", gap: "0.5rem", marginBottom: "0.5rem" }}>
+              <span style={{
+                width: 8, height: 8, borderRadius: "50%", display: "inline-block",
+                background: lookupResult.active_session ? "#22c55e" : "#ef4444",
+                boxShadow: lookupResult.active_session ? "0 0 6px #22c55e80" : "none",
+              }} />
+              <span style={{ fontSize: "0.85rem", fontWeight: 700, color: lookupResult.active_session ? "#22c55e" : "#ef4444" }}>
+                {lookupResult.active_session ? "IN" : "OUT"}
+              </span>
+              {lookupResult.balance != null && (
+                <span style={{ marginLeft: "auto", fontSize: "0.85rem", fontWeight: 700, color: "#a855f7" }}>
+                  Balance: {lookupResult.balance} NC
+                </span>
+              )}
+            </div>
+
+            {/* Last visits */}
+            {lookupResult.sessions.length > 0 ? (
+              <div style={{ overflowX: "auto" }}>
+                <table style={{ width: "100%", borderCollapse: "collapse", fontSize: "0.75rem" }}>
+                  <thead>
+                    <tr style={{ borderBottom: "1px solid #1e1e2e" }}>
+                      <th style={{ padding: "0.3rem 0.5rem", textAlign: "left", color: "#64748b", fontWeight: 600 }}>Venue</th>
+                      <th style={{ padding: "0.3rem 0.5rem", textAlign: "left", color: "#64748b", fontWeight: 600 }}>Date</th>
+                      <th style={{ padding: "0.3rem 0.5rem", textAlign: "right", color: "#64748b", fontWeight: 600 }}>Spent</th>
+                      <th style={{ padding: "0.3rem 0.5rem", textAlign: "right", color: "#64748b", fontWeight: 600 }}>Status</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {lookupResult.sessions.slice(0, 5).map(s => (
+                      <tr key={s.id} style={{ borderBottom: "1px solid #1e1e2e10" }}>
+                        <td style={{ padding: "0.3rem 0.5rem", color: "#cbd5e1" }}>{s.venue_name}</td>
+                        <td style={{ padding: "0.3rem 0.5rem", color: "#94a3b8" }}>{new Date(s.started_at).toLocaleDateString()}</td>
+                        <td style={{ padding: "0.3rem 0.5rem", textAlign: "right", color: "#f97316", fontWeight: 600 }}>{s.total_spend} NC</td>
+                        <td style={{ padding: "0.3rem 0.5rem", textAlign: "right", color: s.ended_at ? "#64748b" : "#22c55e" }}>
+                          {s.ended_at ? "Ended" : "Active"}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            ) : (
+              <div style={{ fontSize: "0.8rem", color: "#64748b", textAlign: "center", padding: "0.75rem" }}>
+                No visit history for this UID.
+              </div>
+            )}
           </div>
         )}
       </div>
