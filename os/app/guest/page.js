@@ -14,6 +14,10 @@ export default function GuestPanel() {
   const [me, setMe] = useState(null);
   const [scanning, setScanning] = useState(false);
   const nfcAvailable = typeof window !== "undefined" && isNfcSupported();
+  // Layer 2 profile
+  const [featureLayer, setFeatureLayer] = useState(1);
+  const [profile, setProfile] = useState(null);
+  const [profileTab, setProfileTab] = useState("stats");
 
   function startNfcScan() {
     if (scanning) return;
@@ -99,17 +103,41 @@ export default function GuestPanel() {
     finally { setLoading(false); }
   }
 
+  async function loadConfig() {
+    try {
+      const res = await fetch(`${API_BASE}/config`, { cache: "no-store" });
+      const j = await res.json();
+      setFeatureLayer(j.feature_layer || 1);
+    } catch {}
+  }
+
+  async function loadProfile() {
+    const token = localStorage.getItem("pwl_guest_token");
+    if (!token || featureLayer < 2) return;
+    try {
+      const res = await fetch(`${API_BASE}/me/profile`, { headers: { Authorization: `Bearer ${token}` } });
+      const j = await res.json();
+      if (res.ok) setProfile(j);
+    } catch {}
+  }
+
   function clearSession() {
     localStorage.removeItem("pwl_guest_token");
     setMe(null);
+    setProfile(null);
     showToast("Session cleared", "info");
   }
 
   useEffect(() => {
     loadVenues();
     loadMe();
+    loadConfig();
     track("pageview", { page: "/guest" });
   }, []);
+
+  useEffect(() => {
+    if (featureLayer >= 2 && me) loadProfile();
+  }, [featureLayer, me]);
 
   const venueName = me?.session?.venue_id
     ? venues.find(v => v.id === me.session.venue_id)?.name || `Venue #${me.session.venue_id}`
@@ -200,6 +228,132 @@ export default function GuestPanel() {
           <button className="btn-press" onClick={clearSession} style={{ marginLeft: "auto" }}>Clear Local</button>
         </div>
       </div>
+
+      {/* Layer 2: Full Profile */}
+      {featureLayer >= 2 && me && profile && (
+        <div style={{ marginBottom: "1rem" }}>
+          {/* Profile tabs */}
+          <div style={{ display: "flex", gap: "0.25rem", marginBottom: "0.75rem" }}>
+            {[["stats", "Stats"], ["quests", "Quests"], ["history", "History"]].map(([key, label]) => (
+              <button
+                key={key}
+                onClick={() => setProfileTab(key)}
+                className="btn-press"
+                style={{
+                  padding: "0.4rem 0.8rem", fontSize: "0.8rem", fontWeight: 700,
+                  background: profileTab === key ? "#a855f7" : "#14141f",
+                  color: profileTab === key ? "#fff" : "#94a3b8",
+                  border: `1px solid ${profileTab === key ? "#a855f7" : "#1e1e2e"}`,
+                  borderRadius: "0.5rem",
+                }}
+              >{label}</button>
+            ))}
+          </div>
+
+          {/* Stats tab */}
+          {profileTab === "stats" && (
+            <div className="card">
+              <div style={{ display: "flex", alignItems: "center", gap: "0.75rem", marginBottom: "0.75rem" }}>
+                <div style={{
+                  width: 48, height: 48, borderRadius: "50%",
+                  background: "linear-gradient(135deg, #a855f7, #06b6d4)",
+                  display: "flex", alignItems: "center", justifyContent: "center",
+                  fontSize: "1.2rem", fontWeight: 900, color: "#fff",
+                }}>
+                  {profile.user.level}
+                </div>
+                <div>
+                  <div style={{ fontWeight: 800, fontSize: "1rem" }}>Level {profile.user.level}</div>
+                  <div style={{ fontSize: "0.75rem", color: "#64748b" }}>{profile.user.email}</div>
+                </div>
+              </div>
+              {/* XP progress bar */}
+              <div style={{ marginBottom: "0.5rem" }}>
+                <div style={{ display: "flex", justifyContent: "space-between", fontSize: "0.7rem", color: "#94a3b8", marginBottom: "0.2rem" }}>
+                  <span>XP Progress</span>
+                  <span>{profile.xp_progress.current} / {profile.xp_progress.needed}</span>
+                </div>
+                <div style={{ height: "0.4rem", borderRadius: "0.2rem", background: "#0a0a0f", overflow: "hidden" }}>
+                  <div style={{
+                    height: "100%", borderRadius: "0.2rem",
+                    width: `${Math.min(100, Math.round((profile.xp_progress.current / Math.max(1, profile.xp_progress.needed)) * 100))}%`,
+                    background: "linear-gradient(90deg, #a855f7, #06b6d4)",
+                    transition: "width 0.3s ease",
+                  }} />
+                </div>
+              </div>
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: "0.5rem", marginTop: "0.75rem" }}>
+                <MiniStat label="Total XP" value={profile.user.xp} color="#06b6d4" />
+                <MiniStat label="Wallet" value={`${profile.user.points} NC`} color="#a855f7" />
+                <MiniStat label="Visits" value={profile.visits.length} color="#22c55e" />
+              </div>
+            </div>
+          )}
+
+          {/* Quests tab */}
+          {profileTab === "quests" && (
+            <div className="card">
+              {profile.quest_completions.length > 0 ? (
+                <div style={{ display: "grid", gap: "0.4rem" }}>
+                  {profile.quest_completions.map((q, i) => (
+                    <div key={i} style={{
+                      display: "flex", justifyContent: "space-between", alignItems: "center",
+                      padding: "0.4rem 0", borderBottom: "1px solid #1e1e2e",
+                      fontSize: "0.85rem",
+                    }}>
+                      <span style={{ color: "#cbd5e1" }}>Quest #{q.quest_id}</span>
+                      <span style={{ fontSize: "0.75rem", color: "#64748b" }}>
+                        {new Date(q.completed_at).toLocaleDateString()}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <div style={{ textAlign: "center", color: "#64748b", padding: "1rem", fontSize: "0.85rem" }}>
+                  No quests completed yet.
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* History tab */}
+          {profileTab === "history" && (
+            <div className="card" style={{ padding: 0, overflow: "auto" }}>
+              {profile.visits.length > 0 ? (
+                <table style={{ width: "100%", borderCollapse: "collapse", fontSize: "0.8rem" }}>
+                  <thead>
+                    <tr>
+                      <th style={{ padding: "0.5rem", textAlign: "left", color: "#64748b", fontWeight: 600, borderBottom: "1px solid #1e1e2e" }}>Date</th>
+                      <th style={{ padding: "0.5rem", textAlign: "right", color: "#64748b", fontWeight: 600, borderBottom: "1px solid #1e1e2e" }}>Spent</th>
+                      <th style={{ padding: "0.5rem", textAlign: "right", color: "#64748b", fontWeight: 600, borderBottom: "1px solid #1e1e2e" }}>Duration</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {profile.visits.map(v => {
+                      const dur = v.ended_at
+                        ? Math.round((new Date(v.ended_at) - new Date(v.started_at)) / 60000)
+                        : null;
+                      return (
+                        <tr key={v.id} style={{ borderBottom: "1px solid #1e1e2e10" }}>
+                          <td style={{ padding: "0.4rem 0.5rem", color: "#cbd5e1" }}>{new Date(v.started_at).toLocaleDateString()}</td>
+                          <td style={{ padding: "0.4rem 0.5rem", textAlign: "right", color: "#f97316", fontWeight: 600 }}>{v.total_spend} NC</td>
+                          <td style={{ padding: "0.4rem 0.5rem", textAlign: "right", color: "#94a3b8" }}>
+                            {dur != null ? `${dur}m` : <span style={{ color: "#22c55e" }}>Active</span>}
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              ) : (
+                <div style={{ textAlign: "center", color: "#64748b", padding: "1rem", fontSize: "0.85rem" }}>
+                  No visit history yet.
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+      )}
 
       {/* No session state */}
       {!me && (
