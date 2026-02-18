@@ -718,8 +718,13 @@ app.post("/guest/checkout", { preHandler: requireAuth }, async (req, reply) => {
     "UPDATE venue_sessions SET ended_at=now() WHERE user_id=$1 AND ended_at IS NULL RETURNING *",
     [req.user.uid]
   );
-  if (r.rowCount === 0) return reply.code(400).send({ error: "No active session" });
-  return { ok: true, session: r.rows[0] };
+  if (r.rowCount === 0) return reply.code(400).send({ error: "NO_ACTIVE_SESSION" });
+  const session = r.rows[0];
+  await pool.query(
+    "INSERT INTO logs (venue_id, type, payload) VALUES ($1,'CHECKOUT',$2)",
+    [session.venue_id, { user_id: req.user.uid, session_id: session.id }]
+  );
+  return { ok: true, session };
 });
 
 // ─── Wallet Top-up ──────────────────────────────────────────

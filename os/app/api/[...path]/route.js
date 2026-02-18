@@ -15,7 +15,8 @@ async function proxy(request, { params }) {
   try {
     const opts = { method: request.method, headers, cache: "no-store" };
     if (request.method !== "GET" && request.method !== "HEAD") {
-      opts.body = await request.text();
+      const text = await request.text();
+      if (text) opts.body = text;
     }
     const res = await fetch(url, opts);
     const data = await res.text();

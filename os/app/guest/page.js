@@ -92,7 +92,8 @@ export default function GuestPanel() {
     try {
       const res = await fetch(`${API_BASE}/guest/checkout`, {
         method: "POST",
-        headers: { Authorization: `Bearer ${token}` }
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+        body: JSON.stringify({})
       });
       const j = await res.json();
       if (!res.ok) { showToast(j.error || "Checkout failed", "error"); return; }
@@ -224,7 +225,7 @@ export default function GuestPanel() {
           <button className="btn-primary btn-press" onClick={checkin} disabled={!venueId || loading}>
             {loading ? "..." : "Check In"}
           </button>
-          <button className="btn-secondary btn-press" onClick={checkout} disabled={loading}>End Session</button>
+          <button className="btn-secondary btn-press" onClick={checkout} disabled={loading || !me?.session}>End Session</button>
           <button className="btn-press" onClick={clearSession} style={{ marginLeft: "auto" }}>Clear Local</button>
         </div>
       </div>
