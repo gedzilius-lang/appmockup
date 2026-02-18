@@ -1,5 +1,6 @@
 "use client";
 import { useEffect, useState } from "react";
+import { useNetworkStatus } from "../../lib/useNetworkStatus";
 
 const API_BASE = "/api";
 
@@ -17,6 +18,8 @@ export default function BarPOS() {
   const [isMobile, setIsMobile] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [confirmingOrder, setConfirmingOrder] = useState(false);
+  const [lastFailedOrder, setLastFailedOrder] = useState(null);
+  const networkOnline = useNetworkStatus();
 
   const token = typeof window !== "undefined" ? localStorage.getItem("pwl_token") : null;
   const venueId = typeof window !== "undefined" ? localStorage.getItem("pwl_venue_id") : null;
@@ -91,6 +94,7 @@ export default function BarPOS() {
 
   async function submitOrder() {
     if (cart.length === 0 || submitting) return;
+    if (!networkOnline) { showToast("Cannot submit — network unavailable", "error"); return; }
     if (cartTotal >= 200 && !confirmingOrder) {
       setConfirmingOrder(true);
       return;
@@ -122,6 +126,8 @@ export default function BarPOS() {
                   d.error === "INSUFFICIENT_FUNDS" ? `Insufficient funds (need ${d.required} NC, have ${d.balance} NC)` :
                   err.message || "Order failed";
       showToast(msg, "error");
+      // Save failed order for retry
+      setLastFailedOrder([...cart]);
     } finally {
       setSubmitting(false);
     }
@@ -137,6 +143,13 @@ export default function BarPOS() {
     } catch (err) {
       showToast(err.message, "error");
     }
+  }
+
+  function retryLastOrder() {
+    if (!lastFailedOrder) return;
+    setCart(lastFailedOrder);
+    setLastFailedOrder(null);
+    showToast("Cart restored from last failed order", "info");
   }
 
   // ── Derived state ─────────────────────────────────────────────
@@ -238,13 +251,13 @@ export default function BarPOS() {
               <button onClick={() => setConfirmingOrder(false)} className="btn-secondary btn-press" style={{ flex: 1 }}>
                 Cancel
               </button>
-              <button onClick={submitOrder} disabled={submitting} className="btn-danger btn-press" style={{ flex: 1, fontWeight: 800 }}>
+              <button onClick={submitOrder} disabled={submitting || !networkOnline} className="btn-danger btn-press" style={{ flex: 1, fontWeight: 800 }}>
                 {submitting ? "..." : `Confirm ${cartTotal} NC`}
               </button>
             </div>
           </div>
         ) : (
-          <button onClick={submitOrder} disabled={submitting} className="btn-confirm">
+          <button onClick={submitOrder} disabled={submitting || !networkOnline} className="btn-confirm">
             {submitting ? "Confirming..." : `Confirm Order — ${cartTotal} NC`}
           </button>
         )}
@@ -263,6 +276,27 @@ export default function BarPOS() {
             <div className="spinner" style={{ width: "2.5rem", height: "2.5rem", margin: "0 auto 1rem" }} />
             <div style={{ fontSize: "1.1rem", fontWeight: 700, color: "#a855f7" }}>Submitting order...</div>
           </div>
+        </div>
+      )}
+
+      {/* Offline banner */}
+      {!networkOnline && (
+        <div style={{
+          marginBottom: "0.75rem", padding: "0.6rem 1rem", borderRadius: "0.5rem",
+          background: "#ef444420", border: "1px solid #ef444460", color: "#ef4444",
+          fontSize: "0.85rem", fontWeight: 700, textAlign: "center",
+          display: "flex", alignItems: "center", justifyContent: "center", gap: "0.75rem",
+        }}>
+          <span>Network unavailable</span>
+          {lastFailedOrder && (
+            <button onClick={retryLastOrder} className="btn-press" style={{
+              padding: "0.3rem 0.7rem", fontSize: "0.75rem", fontWeight: 700,
+              border: "1px solid #ef444460", borderRadius: "0.375rem",
+              background: "#ef444430", color: "#ef4444", cursor: "pointer",
+            }}>
+              Retry Last Order
+            </button>
+          )}
         </div>
       )}
 

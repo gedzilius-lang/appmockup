@@ -1,6 +1,7 @@
 "use client";
 import { useEffect, useState } from "react";
 import { isNfcSupported, scanUidOnce } from "../../lib/nfc";
+import { useNetworkStatus } from "../../lib/useNetworkStatus";
 
 const API_BASE = "/api";
 const QUICK_AMOUNTS = [20, 50, 100, 200];
@@ -57,6 +58,7 @@ export default function SecurityPage() {
   const [lookupResult, setLookupResult] = useState(null);
   const [lookupLoading, setLookupLoading] = useState(false);
   const [lookupScanning, setLookupScanning] = useState(false);
+  const networkOnline = useNetworkStatus();
 
   function startNfcScan() {
     if (scanning && scanCtrl) { scanCtrl.abort(); setScanning(false); return; }
@@ -146,6 +148,7 @@ export default function SecurityPage() {
   }
 
   async function topUp() {
+    if (!networkOnline) { showToast("Cannot top up — network unavailable", "error"); return; }
     if (!validateTopup()) return;
     const amt = Number(topupAmount);
     if (amt >= 200 && !pendingHighValue) {
@@ -203,6 +206,15 @@ export default function SecurityPage() {
         </div>
       </div>
 
+      {!networkOnline && (
+        <div style={{
+          marginBottom: "1rem", padding: "0.6rem 1rem", borderRadius: "0.5rem",
+          background: "#ef444420", border: "1px solid #ef444460", color: "#ef4444",
+          fontSize: "0.85rem", fontWeight: 700, textAlign: "center",
+        }}>
+          Network unavailable
+        </div>
+      )}
       {status && <div className="card" style={{ marginBottom: "1rem", color: "#f97316" }}>{status}</div>}
 
       {/* Wallet Top-up Panel */}
@@ -279,7 +291,7 @@ export default function SecurityPage() {
           />
           <button
             onClick={topUp}
-            disabled={topupLoading}
+            disabled={topupLoading || !networkOnline}
             className={`${pendingHighValue ? "btn-danger" : "btn-confirm"} btn-press`}
             style={{ width: "auto", padding: "0.5rem 1.5rem", fontSize: "0.9rem" }}
           >
