@@ -14,6 +14,16 @@ export async function apiFetch(path, options = {}) {
   const data = await res.json().catch(() => null);
 
   if (!res.ok) {
+    if ((res.status === 401 || res.status === 403) && typeof window !== "undefined") {
+      const role = localStorage.getItem("pwl_role");
+      if (role) {
+        localStorage.removeItem("pwl_token");
+        localStorage.removeItem("pwl_role");
+        localStorage.removeItem("pwl_venue_id");
+        window.location.href = "/ops?expired=1";
+        return;
+      }
+    }
     const err = new Error(data?.error || `HTTP ${res.status}`);
     err.status = res.status;
     err.data = data;

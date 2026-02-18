@@ -1,8 +1,7 @@
 "use client";
 import { useEffect, useState } from "react";
 import { useNetworkStatus } from "../../lib/useNetworkStatus";
-
-const API_BASE = "/api";
+import { apiFetch as sharedApiFetch, API_BASE } from "../../lib/api";
 
 export default function BarPOS() {
   const [menu, setMenu] = useState([]);
@@ -30,12 +29,7 @@ export default function BarPOS() {
   }
 
   async function apiFetch(path, opts = {}) {
-    const headers = { "Content-Type": "application/json", ...opts.headers };
-    if (token) headers.Authorization = `Bearer ${token}`;
-    const res = await fetch(`${API_BASE}${path}`, { ...opts, headers });
-    const data = await res.json().catch(() => null);
-    if (!res.ok) throw new Error(data?.error || `HTTP ${res.status}`);
-    return data;
+    return sharedApiFetch(path, opts);
   }
 
   async function loadMenu() {

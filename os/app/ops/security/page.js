@@ -2,8 +2,7 @@
 import { useEffect, useState } from "react";
 import { isNfcSupported, scanUidOnce } from "../../lib/nfc";
 import { useNetworkStatus } from "../../lib/useNetworkStatus";
-
-const API_BASE = "/api";
+import { apiFetch, API_BASE } from "../../lib/api";
 const QUICK_AMOUNTS = [20, 50, 100, 200];
 
 const TYPE_COLORS = {
@@ -87,42 +86,41 @@ export default function SecurityPage() {
 
   async function load() {
     if (!token || !venueId) return setStatus("Not logged in. Go to /ops");
-    const res = await fetch(`${API_BASE}/logs/${venueId}`, { headers: { Authorization: `Bearer ${token}` } });
-    const j = await res.json();
-    if (!res.ok) return setStatus(j.error || "Failed to load logs");
-    setLogs(j);
-    setStatus("");
+    try {
+      const j = await apiFetch(`/logs/${venueId}`);
+      setLogs(j);
+      setStatus("");
+    } catch (err) {
+      setStatus(err.message || "Failed to load logs");
+    }
   }
 
   async function addIncident() {
     if (!token || !venueId || !incident.trim()) return;
-    const res = await fetch(`${API_BASE}/logs`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
-      body: JSON.stringify({
-        venue_id: Number(venueId),
-        type: "INCIDENT",
-        payload: { text: incident }
-      })
-    });
-    const j = await res.json();
-    if (!res.ok) { showToast(j.error || "Failed to submit", "error"); return; }
-    setIncident("");
-    showToast("Incident logged", "success");
-    await load();
+    try {
+      await apiFetch("/logs", {
+        method: "POST",
+        body: JSON.stringify({
+          venue_id: Number(venueId),
+          type: "INCIDENT",
+          payload: { text: incident }
+        })
+      });
+      setIncident("");
+      showToast("Incident logged", "success");
+      await load();
+    } catch (err) {
+      showToast(err.message || "Failed to submit", "error");
+    }
   }
 
   async function lookupUidHistory() {
     if (!lookupUid.trim()) return;
     setLookupLoading(true);
     try {
-      const res = await fetch(`${API_BASE}/uid/${encodeURIComponent(lookupUid.trim())}/history`, {
-        headers: { Authorization: `Bearer ${token}` },
-      });
-      const j = await res.json();
-      if (!res.ok) { showToast(j.error || "Lookup failed", "error"); setLookupResult(null); return; }
+      const j = await apiFetch(`/uid/${encodeURIComponent(lookupUid.trim())}/history`);
       setLookupResult(j);
-    } catch { showToast("Network error", "error"); }
+    } catch (err) { showToast(err.message || "Lookup failed", "error"); setLookupResult(null); }
     finally { setLookupLoading(false); }
   }
 
@@ -163,20 +161,10 @@ export default function SecurityPage() {
       const body = { amount: amt };
       if (topupSessionId.trim()) body.session_id = Number(topupSessionId);
       else if (topupUid.trim()) body.uid_tag = topupUid.trim();
-      const res = await fetch(`${API_BASE}/wallet/topup`, {
+      const j = await apiFetch("/wallet/topup", {
         method: "POST",
-        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
         body: JSON.stringify(body),
       });
-      const j = await res.json();
-      if (!res.ok) {
-        if (res.status === 429) {
-          showToast("Slow down — 1 top-up per second", "error");
-        } else {
-          showToast(j.error || "Top-up failed", "error");
-        }
-        return;
-      }
       setTopupSuccess({ amount: amt, balance: j.new_balance });
       showToast(`Top-up complete: +${amt} NC → Balance ${j.new_balance} NC`, "success");
       setTopupAmount("");
@@ -184,7 +172,7 @@ export default function SecurityPage() {
       setTopupSessionId("");
       setTopupErrors({});
       await load();
-    } catch { showToast("Network error", "error"); }
+    } catch (err) { showToast(err.message || "Top-up failed", "error"); }
     finally { setTopupLoading(false); }
   }
 

@@ -1,7 +1,6 @@
 "use client";
 import { useEffect, useState, useRef } from "react";
-
-const API_BASE = "/api";
+import { apiFetch as sharedApiFetch, API_BASE } from "../../lib/api";
 
 function timeAgo(dateStr) {
   const diff = Date.now() - new Date(dateStr).getTime();
@@ -25,10 +24,7 @@ export default function RunnerPage() {
   const venueId = typeof window !== "undefined" ? localStorage.getItem("pwl_venue_id") : null;
 
   async function apiFetch(path) {
-    const res = await fetch(`${API_BASE}${path}`, { headers: { Authorization: `Bearer ${token}` } });
-    const j = await res.json();
-    if (!res.ok) throw new Error(j.error || `HTTP ${res.status}`);
-    return j;
+    return sharedApiFetch(path);
   }
 
   async function load() {

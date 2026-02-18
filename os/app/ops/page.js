@@ -1,5 +1,5 @@
 "use client";
-import { useState } from "react";
+import { useState, useEffect } from "react";
 
 const API_BASE = "/api";
 
@@ -14,6 +14,17 @@ export default function OpsLogin() {
   const [role, setRole] = useState("BAR");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
+  const [expired, setExpired] = useState(false);
+
+  useEffect(() => {
+    if (typeof window !== "undefined") {
+      const params = new URLSearchParams(window.location.search);
+      if (params.get("expired") === "1") {
+        setExpired(true);
+        window.history.replaceState({}, "", "/ops");
+      }
+    }
+  }, []);
 
   async function login() {
     setError("");
@@ -58,6 +69,16 @@ export default function OpsLogin() {
           Staff login with venue PIN
         </p>
       </div>
+
+      {expired && (
+        <div style={{
+          background: "#f9731620", border: "1px solid #f97316", borderRadius: "0.5rem",
+          padding: "0.75rem 1rem", marginBottom: "1rem", fontSize: "0.85rem", color: "#f97316",
+          textAlign: "center",
+        }}>
+          Session expired. Please sign in again.
+        </div>
+      )}
 
       <div className="card" style={{ padding: "1.5rem" }}>
         {/* Role selection as cards */}
