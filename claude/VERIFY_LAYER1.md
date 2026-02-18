@@ -103,6 +103,48 @@ SELECT id, item, max_qty FROM inventory WHERE max_qty IS NULL;
 ```
 Expected: 0 rows for seeded venue.
 
+## 12. Load Test (VPS)
+
+```bash
+cd /opt/pwl-os/appmockup
+
+# Copy into API container
+docker cp scripts/load-test.js pwl-os-api-1:/app/load-test.cjs
+
+# Sequential (200 orders)
+docker exec pwl-os-api-1 node /app/load-test.cjs --base http://localhost:4000 --pin 1111
+
+# Parallel (5 lanes)
+docker exec pwl-os-api-1 node /app/load-test.cjs --base http://localhost:4000 --pin 1111 --parallel
+```
+
+- [ ] Sequential: 200/200, error rate 0%, avg < 50ms
+- [ ] Parallel: 200/200, error rate 0%, no deadlocks
+- [ ] Idempotency check: PASS
+- [ ] Inventory non-negative: PASS
+
+## 13. Backup & Restore (VPS)
+
+```bash
+cd /opt/pwl-os/appmockup
+
+# Create backup
+bash scripts/backup.sh
+
+# Dry-run restore
+bash scripts/restore.sh backups/db_pwlos_*.sql.gz
+```
+
+- [ ] Backup creates .sql.gz file in backups/
+- [ ] Dry-run restore: row counts match for venues, users, orders, inventory, menu_items
+- [ ] Test DB cleaned up after dry-run
+
+## 14. /status Endpoint (VPS)
+
+- [ ] `GET /status` without auth → 401
+- [ ] `GET /status` as BAR → 403
+- [ ] `GET /status` as MAIN_ADMIN → full metrics (uptime, db_pool, latencies)
+
 ## Status
 - [ ] ALL PASS -> production ready
 - [ ] FAILURES -> fix before next phase

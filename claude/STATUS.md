@@ -356,6 +356,40 @@ created new menu items, the OS bar POS could receive cached responses missing th
 - [x] MAIN_ADMIN GET /menu/2 → 11 items (cross-venue: OK, admin retains access)
 - [x] All containers running, no errors
 
+## Phases 6–8 Final Results (2026-02-18)
+
+### Phase 6 — Load & Stress Testing
+
+| Test | Orders | Success | Error Rate | Throughput | Avg Latency | p95 |
+|------|--------|---------|------------|------------|-------------|-----|
+| Sequential (200) | 200/200 | 100% | 0% | 190.5 ord/s | 5ms | 8ms |
+| Parallel (5×40) pre-fix | 176/200 | 88% | 12% | — | — | — |
+| Parallel (5×40) post-fix | 200/200 | 100% | 0% | 245.1 ord/s | 19ms | 36ms |
+
+- **Deadlock fix**: sorted inventory item locks by ID before `SELECT FOR UPDATE`
+- **Network interruption**: API restarted mid-test — no corrupted orders, no negative inventory, no duplicate idempotency keys
+- **Idempotency check**: PASS (duplicate key returns existing order)
+- **Inventory non-negative**: PASS (no `stock_qty < 0` after test)
+- **DB pool**: stable at totalCount=3, idleCount=2, waitingCount=0
+
+### Phase 7 — Backup & Restore
+- pg_dump: 47KB compressed backup created
+- Restore dry-run to separate DB: verified all table row counts match
+- Scripts: `scripts/backup.sh`, `scripts/restore.sh` (with --force safety)
+- Cron schedule documented in OPS_RUNBOOK
+
+### Phase 8 — Confidence Assessment
+- **Confidence: HIGH** for live night
+- Caveat: deployment pipeline now fixed (deploy.sh script, single compose file in repo)
+
+### Commits
+| Commit | Description |
+|--------|-------------|
+| f114cc0 | Add load test script |
+| ce28ec7 | Fix load test: disable keep-alive, add timeout |
+| d0f72c2 | Fix deadlock: sort inventory items by ID |
+| 7ee6271 | Add OPS Runbook |
+
 ## Next Steps
 1. **USER ACTION NEEDED**: Browser test of offline UX + confirm bar/security still work
 2. Next ops plan commits as directed
