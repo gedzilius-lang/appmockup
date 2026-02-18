@@ -336,6 +336,26 @@ created new menu items, the OS bar POS could receive cached responses missing th
 - [x] DB pool stats: totalCount=1, idleCount=1, waitingCount=0
 - [x] No sensitive data in response (no tokens, passwords, secrets)
 
+## COMMIT 5 — Permission Tightening (deployed 2026-02-18)
+
+### Changes
+- **`canAccessVenue(user, venueId)`** helper: MAIN_ADMIN accesses all venues, everyone else restricted to own `venue_id`
+- **Venue-scoped reads**: GET /menu/:vid, /inventory/:vid, /orders/:vid, /logs/:vid, /headcount/:vid — cross-venue returns 403
+- **Venue-scoped writes**: POST/PUT/DELETE /menu, /inventory — VENUE_ADMIN can only modify own venue
+- **PUT /venues/:id** — VENUE_ADMIN restricted to own venue
+- **POST /logs** — upgraded from `requireAuth` to `requireRole(staff roles)` + venue scope
+- **PUT /notifications/:id/read** — ownership check added (target_user_id must match or MAIN_ADMIN)
+
+### Verification (VPS, 2026-02-18)
+- [x] BAR (venue 2) GET /menu/2 → 11 items (own venue: OK)
+- [x] BAR (venue 2) GET /menu/1 → 403 Forbidden (cross-venue: BLOCKED)
+- [x] BAR (venue 2) GET /orders/2 → 10 orders (own venue: OK)
+- [x] BAR (venue 2) GET /orders/1 → 403 Forbidden (cross-venue: BLOCKED)
+- [x] BAR (venue 2) GET /logs/2 → 18 logs (own venue: OK)
+- [x] BAR (venue 2) GET /logs/1 → 403 Forbidden (cross-venue: BLOCKED)
+- [x] MAIN_ADMIN GET /menu/2 → 11 items (cross-venue: OK, admin retains access)
+- [x] All containers running, no errors
+
 ## Next Steps
-1. COMMIT 5: Permission Tightening
-2. **USER ACTION NEEDED**: Browser test of offline UX on phone
+1. **USER ACTION NEEDED**: Browser test of offline UX + confirm bar/security still work
+2. Next ops plan commits as directed
