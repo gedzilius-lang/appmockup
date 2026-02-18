@@ -100,7 +100,12 @@ export default function InventoryPage() {
   }
 
   useEffect(() => { loadVenues(); }, []);
-  useEffect(() => { if (venueId) loadInventory(); }, [venueId]);
+  useEffect(() => {
+    if (!venueId) return;
+    loadInventory();
+    const t = setInterval(loadInventory, 10000);
+    return () => clearInterval(t);
+  }, [venueId]);
 
   if (loading) {
     return <div style={{ display: "flex", justifyContent: "center", padding: "3rem" }}><div className="spinner" /></div>;

@@ -155,7 +155,7 @@ export default function MenuPage() {
               </select>
             </div>
             <div className="form-group">
-              <label>Display Order</label>
+              <label title="Controls the order shown in the POS grid (lower number appears first)">Display Order <span style={{ cursor: "help", color: "#64748b", fontSize: "0.7rem" }}>[?]</span></label>
               <input type="number" value={form.display_order} onChange={e => setForm({ ...form, display_order: e.target.value })} placeholder="0" />
             </div>
             {editId && (
