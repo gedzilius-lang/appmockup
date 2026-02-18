@@ -40,8 +40,10 @@ function request(method, path, body, headers = {}) {
       port: url.port,
       path: url.pathname + url.search,
       method,
+      agent: false,
       headers: {
         "Content-Type": "application/json",
+        Connection: "close",
         ...headers,
       },
     };
@@ -55,6 +57,9 @@ function request(method, path, body, headers = {}) {
           resolve({ status: res.statusCode, body: data });
         }
       });
+    });
+    req.setTimeout(10000, () => {
+      req.destroy(new Error("Request timeout (10s)"));
     });
     req.on("error", reject);
     if (body) req.write(JSON.stringify(body));
