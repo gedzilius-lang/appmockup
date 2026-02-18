@@ -3,9 +3,15 @@ import cors from "@fastify/cors";
 import pg from "pg";
 import bcrypt from "bcryptjs";
 import jwt from "jsonwebtoken";
+import { randomUUID } from "crypto";
 
-const app = Fastify({ logger: true });
+const app = Fastify({ logger: true, genReqId: () => randomUUID() });
 await app.register(cors, { origin: true });
+
+// X-Request-Id on every response
+app.addHook("onSend", async (req, reply) => {
+  reply.header("X-Request-Id", req.id);
+});
 
 const { Pool } = pg;
 const pool = new Pool({ connectionString: process.env.DATABASE_URL, max: 10 });
@@ -1032,8 +1038,8 @@ app.get("/inventory/:venue_id", { preHandler: requireAuth }, async (req) => {
 app.post("/inventory/:venue_id", { preHandler: requireRole(ADMIN_ROLES) }, async (req) => {
   const { item, qty, low_threshold } = req.body || {};
   const r = await pool.query(
-    "INSERT INTO inventory (venue_id, item, qty, low_threshold) VALUES ($1,$2,$3,$4) RETURNING *",
-    [req.params.venue_id, item, qty, low_threshold ?? 5]
+    "INSERT INTO inventory (venue_id, item, qty, low_threshold, max_qty) VALUES ($1,$2,$3,$4,$5) RETURNING *",
+    [req.params.venue_id, item, qty, low_threshold ?? 5, qty]
   );
   return r.rows[0];
 });

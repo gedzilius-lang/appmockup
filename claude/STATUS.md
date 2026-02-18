@@ -3,6 +3,70 @@
 ## Last Updated
 2026-02-18
 
+## VPS Verification Evidence (2026-02-18)
+
+### Routing + Headers
+| Endpoint | Status | Cache-Control | Security Headers |
+|----------|--------|---------------|------------------|
+| os.peoplewelike.club/ | 200 | private, no-cache, no-store | X-Content-Type-Options, X-Frame-Options, Referrer-Policy |
+| admin.peoplewelike.club/ | 200 | s-maxage=31536000 (static page) | same |
+| api.peoplewelike.club/health | 200 | (none, JSON) | same |
+| os.../api/health | 200 `{"ok":true}` | — | — |
+| admin.../api/health | 200 `{"ok":true}` | — | — |
+
+### Auth Flows
+| Flow | Result |
+|------|--------|
+| PIN login BAR (os domain) | token OK, uid=22, venue_id=2 |
+| PIN login SECURITY (os domain) | token OK, uid=14, venue_id=2 |
+| Admin email login (admin domain) | token OK, uid=1, role=MAIN_ADMIN |
+| GET /me (all tokens) | Correct user data returned |
+
+### Menu Create → Fetch → Order (Step 1 E2E)
+- Admin POST /menu → created id=14 "VerifyShot-*" (Shots, 5 NC, venue 2)
+- OS GET /menu/2 → 12 items total, new item found=True
+- Bar POST /orders with menu_item_id=14 → Order #9, 5 NC, success
+- Cleanup: DELETE /menu/14 → deactivated
+
+### Feature Gates
+| Endpoint | Expected | Actual |
+|----------|----------|--------|
+| GET /config | feature_layer=1 | `{"feature_layer":1}` |
+| GET /quests/2 | FEATURE_LOCKED | `{"error":"FEATURE_LOCKED","required_layer":2}` |
+| GET /rules/2 | FEATURE_LOCKED | `{"error":"FEATURE_LOCKED","required_layer":2}` |
+| GET /analytics/2 | FEATURE_LOCKED | `{"error":"FEATURE_LOCKED","required_layer":3}` |
+| POST /actions/sell | 410 Gone | `{"error":"GONE","message":"Use POST /orders instead"}` |
+
+### Inventory (max_qty check)
+All 12 Supermarket items have max_qty populated. Sample:
+- Beer: qty=93, max=100, pct=93%
+- Rum: qty=22, max=30, pct=73%
+- Total: 12 items, missing_max_qty=0
+
+### DB Integrity Checks
+| Check | Count | Status |
+|-------|-------|--------|
+| users.points < 0 | 0 | PASS |
+| inventory.qty < 0 | 0 | PASS |
+| menu_items WHERE venue_id IS NULL | 0 | PASS |
+| orders bad (null venue/staff, neg total) | 0 | PASS |
+| inventory.max_qty IS NULL | 0 | PASS (was 4, fixed) |
+| Idempotency duplicates | 0 | PASS |
+| Order total != items sum | 0 | PASS |
+| users_points_non_negative CHECK | exists | PASS |
+
+### DB Fixes Applied
+- SET max_qty = qty for 4 non-Supermarket inventory rows (venues 1, 3)
+- ALTER inventory.max_qty SET NOT NULL DEFAULT 0
+
+### Observability Additions
+- X-Request-Id header on all API responses (crypto.randomUUID)
+- /debug/dbpool already exists (ADMIN-only)
+- inventory POST now sets max_qty = qty automatically
+
+### Verdict
+**All VPS-verifiable checks PASS.** Remaining: real browser/device testing (see claude/BROWSER_TEST_SCRIPT.md).
+
 ## P0.1 — Fix admin menu items visible in bar POS (deployed 2026-02-18)
 
 ### Root Cause
