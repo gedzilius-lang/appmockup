@@ -3,7 +3,6 @@ import { useEffect, useState } from "react";
 import { isNfcSupported, scanUidOnce } from "../../lib/nfc";
 import { useNetworkStatus } from "../../lib/useNetworkStatus";
 import { apiFetch, API_BASE } from "../../lib/api";
-const QUICK_AMOUNTS = [20, 50, 100, 200];
 
 const TYPE_COLORS = {
   SELL: { bg: "#06b6d420", color: "#06b6d4", border: "#06b6d440" },
@@ -38,19 +37,6 @@ export default function SecurityPage() {
   const [incident, setIncident] = useState("");
   const [status, setStatus] = useState("");
   const [toast, setToast] = useState(null);
-  // Top-up state
-  const [topupUid, setTopupUid] = useState("");
-  const [topupSessionId, setTopupSessionId] = useState("");
-  const [topupAmount, setTopupAmount] = useState("");
-  const [topupLoading, setTopupLoading] = useState(false);
-  const [topupSuccess, setTopupSuccess] = useState(null);
-  // Validation
-  const [topupErrors, setTopupErrors] = useState({});
-  // High-value confirmation
-  const [pendingHighValue, setPendingHighValue] = useState(false);
-  // NFC
-  const [scanning, setScanning] = useState(false);
-  const [scanCtrl, setScanCtrl] = useState(null);
   const nfcAvailable = typeof window !== "undefined" && isNfcSupported();
   // UID Lookup
   const [lookupUid, setLookupUid] = useState("");
@@ -58,23 +44,6 @@ export default function SecurityPage() {
   const [lookupLoading, setLookupLoading] = useState(false);
   const [lookupScanning, setLookupScanning] = useState(false);
   const networkOnline = useNetworkStatus();
-
-  function startNfcScan() {
-    if (scanning && scanCtrl) { scanCtrl.abort(); setScanning(false); return; }
-    setScanning(true);
-    const ctrl = scanUidOnce({
-      onUid: (uid) => {
-        setTopupUid(uid);
-        setScanning(false);
-        showToast("NFC scan successful", "success");
-      },
-      onError: (err) => {
-        setScanning(false);
-        showToast(err.message || "NFC scan failed", "error");
-      },
-    });
-    setScanCtrl(ctrl);
-  }
 
   const token = typeof window !== "undefined" ? localStorage.getItem("pwl_token") : null;
   const venueId = typeof window !== "undefined" ? localStorage.getItem("pwl_venue_id") : null;
@@ -133,55 +102,6 @@ export default function SecurityPage() {
     });
   }
 
-  function validateTopup() {
-    const errors = {};
-    const amt = Number(topupAmount);
-    if (!amt || amt <= 0) errors.amount = true;
-    if (!topupUid.trim() && !topupSessionId.trim()) {
-      errors.uid = true;
-      errors.session = true;
-    }
-    setTopupErrors(errors);
-    return Object.keys(errors).length === 0;
-  }
-
-  async function topUp() {
-    if (!networkOnline) { showToast("Cannot top up — network unavailable", "error"); return; }
-    if (!validateTopup()) return;
-    const amt = Number(topupAmount);
-    if (amt >= 200 && !pendingHighValue) {
-      setPendingHighValue(true);
-      showToast(`High value: ${amt} NC — press again to confirm`, "error");
-      return;
-    }
-    setPendingHighValue(false);
-    setTopupLoading(true);
-    setTopupSuccess(null);
-    try {
-      const body = { amount: amt };
-      if (topupSessionId.trim()) body.session_id = Number(topupSessionId);
-      else if (topupUid.trim()) body.uid_tag = topupUid.trim();
-      const j = await apiFetch("/wallet/topup", {
-        method: "POST",
-        body: JSON.stringify(body),
-      });
-      setTopupSuccess({ amount: amt, balance: j.new_balance });
-      showToast(`Top-up complete: +${amt} NC → Balance ${j.new_balance} NC`, "success");
-      setTopupAmount("");
-      setTopupUid("");
-      setTopupSessionId("");
-      setTopupErrors({});
-      await load();
-    } catch (err) { showToast(err.message || "Top-up failed", "error"); }
-    finally { setTopupLoading(false); }
-  }
-
-  function selectQuickAmount(amt) {
-    setTopupAmount(String(amt));
-    setTopupErrors(prev => ({ ...prev, amount: false }));
-    setPendingHighValue(false);
-  }
-
   useEffect(() => { load(); }, []);
 
   return (
@@ -204,121 +124,6 @@ export default function SecurityPage() {
         </div>
       )}
       {status && <div className="card" style={{ marginBottom: "1rem", color: "#f97316" }}>{status}</div>}
-
-      {/* Wallet Top-up Panel */}
-      <div className="card" style={{
-        marginBottom: "1.25rem",
-        border: "1px solid #a855f740",
-        boxShadow: "0 0 20px #a855f715",
-        background: "linear-gradient(135deg, #14141f 0%, #1a1028 100%)",
-      }}>
-        <h2 style={{ margin: "0 0 0.75rem", fontSize: "1rem", fontWeight: 800, color: "#a855f7", display: "flex", alignItems: "center", gap: "0.5rem" }}>
-          <span style={{ fontSize: "1.2rem" }}>💳</span> Top Up Wallet
-        </h2>
-
-        {/* ID inputs */}
-        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "0.5rem", marginBottom: "0.75rem" }}>
-          <div style={{ display: "flex", gap: "0.35rem" }}>
-            <input
-              placeholder="UID tag"
-              value={topupUid}
-              onChange={e => { setTopupUid(e.target.value); setTopupErrors(prev => ({ ...prev, uid: false, session: false })); }}
-              className={topupErrors.uid ? "input-error" : ""}
-              style={{ fontSize: "0.85rem", padding: "0.5rem 0.65rem", flex: 1 }}
-            />
-            {nfcAvailable && (
-              <button
-                onClick={startNfcScan}
-                className={`btn-press ${scanning ? "btn-danger" : "btn-secondary"}`}
-                style={{ padding: "0.4rem 0.6rem", fontSize: "0.75rem", whiteSpace: "nowrap" }}
-                title="Scan NFC tag"
-              >
-                {scanning ? "Stop" : "📡 NFC"}
-              </button>
-            )}
-          </div>
-          <input
-            placeholder="Session ID"
-            value={topupSessionId}
-            onChange={e => { setTopupSessionId(e.target.value); setTopupErrors(prev => ({ ...prev, uid: false, session: false })); }}
-            className={topupErrors.session ? "input-error" : ""}
-            style={{ fontSize: "0.85rem", padding: "0.5rem 0.65rem" }}
-          />
-        </div>
-        {!nfcAvailable && (
-          <p style={{ margin: "0 0 0.5rem", fontSize: "0.65rem", color: "#64748b" }}>
-            NFC scan supported on Android Chrome (HTTPS). Manual UID entry for other browsers.
-          </p>
-        )}
-
-        {/* Quick amount chips */}
-        <div style={{ display: "flex", gap: "0.4rem", flexWrap: "wrap", marginBottom: "0.75rem" }}>
-          {QUICK_AMOUNTS.map(amt => (
-            <button
-              key={amt}
-              className="chip"
-              onClick={() => selectQuickAmount(amt)}
-              style={topupAmount === String(amt) ? { borderColor: "#a855f7", background: "#a855f720", color: "#a855f7" } : {}}
-            >
-              +{amt}
-            </button>
-          ))}
-        </div>
-
-        {/* Amount + submit */}
-        <div style={{ display: "flex", gap: "0.5rem" }}>
-          <input
-            type="number"
-            placeholder="Amount (NC)"
-            min="1"
-            value={topupAmount}
-            onChange={e => { setTopupAmount(e.target.value); setTopupErrors(prev => ({ ...prev, amount: false })); setPendingHighValue(false); }}
-            onKeyDown={e => e.key === "Enter" && topUp()}
-            className={topupErrors.amount ? "input-error" : ""}
-            style={{ flex: 1, fontSize: "1rem", fontWeight: 700, padding: "0.5rem 0.65rem" }}
-          />
-          <button
-            onClick={topUp}
-            disabled={topupLoading || !networkOnline}
-            className={`${pendingHighValue ? "btn-danger" : "btn-confirm"} btn-press`}
-            style={{ width: "auto", padding: "0.5rem 1.5rem", fontSize: "0.9rem" }}
-          >
-            {topupLoading ? "..." : pendingHighValue ? `Confirm ${topupAmount} NC` : "Top Up"}
-          </button>
-        </div>
-
-        {/* High-value warning */}
-        {pendingHighValue && (
-          <div style={{
-            marginTop: "0.5rem",
-            padding: "0.5rem 0.75rem",
-            borderRadius: "0.5rem",
-            background: "#f9731615",
-            border: "1px solid #f9731640",
-            color: "#f97316",
-            fontSize: "0.8rem",
-            fontWeight: 600,
-          }}>
-            High-value top-up ({topupAmount} NC). Press confirm to proceed.
-          </div>
-        )}
-
-        {/* Success message */}
-        {topupSuccess && (
-          <div style={{
-            marginTop: "0.75rem",
-            padding: "0.5rem 0.75rem",
-            borderRadius: "0.5rem",
-            background: "#22c55e15",
-            border: "1px solid #22c55e40",
-            color: "#22c55e",
-            fontSize: "0.85rem",
-            fontWeight: 600,
-          }}>
-            Top-up complete: +{topupSuccess.amount} NC → Balance {topupSuccess.balance} NC
-          </div>
-        )}
-      </div>
 
       {/* UID Lookup Panel */}
       <div className="card" style={{ marginBottom: "1.25rem", border: "1px solid #06b6d440", background: "linear-gradient(135deg, #14141f 0%, #0f1a28 100%)" }}>

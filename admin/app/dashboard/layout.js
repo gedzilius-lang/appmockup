@@ -6,6 +6,7 @@ const NAV_ITEMS = [
   { href: "/dashboard", label: "Dashboard", icon: "\u25A3" },
   { href: "/dashboard/venues", label: "Venues", icon: "\u2302" },
   { href: "/dashboard/events", label: "Events", icon: "\u2606" },
+  { href: "/dashboard/wallet", label: "Wallet", icon: "\u25C7" },
   { href: "/dashboard/inventory", label: "Inventory", icon: "\u25A4" },
   { href: "/dashboard/menu", label: "Menu", icon: "\u2637" },
   { href: "/dashboard/quests", label: "Quests", icon: "\u2694" },

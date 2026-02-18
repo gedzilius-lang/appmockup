@@ -728,7 +728,7 @@ app.post("/guest/checkout", { preHandler: requireAuth }, async (req, reply) => {
 });
 
 // ─── Wallet Top-up ──────────────────────────────────────────
-app.post("/wallet/topup", { preHandler: [requireRole(["BAR", "SECURITY", "DOOR", ...ADMIN_ROLES]), rateLimit("topup", 1000)] }, async (req, reply) => {
+app.post("/wallet/topup", { preHandler: [requireRole(ADMIN_ROLES), rateLimit("topup", 1000)] }, async (req, reply) => {
   const { amount, user_id, session_id, uid_tag } = req.body || {};
   const a = Number(amount);
   if (!a || a <= 0 || !Number.isFinite(a)) {
