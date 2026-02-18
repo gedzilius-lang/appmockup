@@ -16,6 +16,7 @@ services:
       JWT_SECRET: ${JWT_SECRET}
       MAINADMIN_EMAIL: ${MAINADMIN_EMAIL}
       MAINADMIN_PASSWORD: ${MAINADMIN_PASSWORD}
+      DEMO_MODE: ${DEMO_MODE:-false}
     depends_on:
       - db
     restart: unless-stopped

@@ -372,6 +372,7 @@ const ADMIN_ROLES = ["MAIN_ADMIN", "VENUE_ADMIN"];
 
 // ─── Feature Gates ──────────────────────────────────────────
 const FEATURE_LAYER = parseInt(process.env.FEATURE_LAYER || "1", 10);
+const DEMO_MODE = (process.env.DEMO_MODE || "false").toLowerCase() === "true";
 
 function requireLayer(minLayer) {
   return async (req, reply) => {
@@ -393,6 +394,13 @@ function rateLimit(key, windowMs) {
     }
     rateLimitMap.set(id, now);
   };
+}
+
+// ─── Demo Mode Guard ─────────────────────────────────────────
+async function demoBlock(req, reply) {
+  if (DEMO_MODE) {
+    return reply.code(403).send({ error: "DEMO_MODE_BLOCKED" });
+  }
 }
 
 // ─── Automation Engine ───────────────────────────────────────
@@ -439,7 +447,7 @@ async function evaluateRules(venueId, triggerType, context = {}) {
 
 // ─── Health ──────────────────────────────────────────────────
 app.get("/health", async () => ({ ok: true }));
-app.get("/config", async () => ({ feature_layer: FEATURE_LAYER }));
+app.get("/config", async () => ({ feature_layer: FEATURE_LAYER, demo_mode: DEMO_MODE }));
 
 app.get("/debug/dbpool", { preHandler: requireRole(ADMIN_ROLES) }, async () => ({
   totalCount: pool.totalCount,
@@ -667,9 +675,15 @@ app.post("/wallet/topup", { preHandler: [requireRole(["BAR", "SECURITY", "DOOR",
     return reply.code(404).send({ error: "User not found" });
   }
   const newBalance = r.rows[0].points;
+  const topupPayload = { user_id: targetUserId, amount: a, staff_id: req.user.uid, new_balance: newBalance };
+  if (DEMO_MODE) {
+    topupPayload.demo_mode = true;
+    topupPayload.staff_role = req.user.role;
+    topupPayload.timestamp_iso = new Date().toISOString();
+  }
   await pool.query(
     "INSERT INTO logs (venue_id, type, payload) VALUES ($1,'TOPUP',$2)",
-    [venueId, { user_id: targetUserId, amount: a, staff_id: req.user.uid, new_balance: newBalance }]
+    [venueId, topupPayload]
   );
   return { ok: true, new_balance: newBalance, amount: a, user_id: targetUserId, venue_id: venueId };
 });
@@ -740,7 +754,7 @@ app.put("/venues/:id", { preHandler: requireRole(ADMIN_ROLES) }, async (req, rep
   return r.rows[0];
 });
 
-app.delete("/venues/:id", { preHandler: requireRole(["MAIN_ADMIN"]) }, async (req, reply) => {
+app.delete("/venues/:id", { preHandler: [requireRole(["MAIN_ADMIN"]), demoBlock] }, async (req, reply) => {
   const r = await pool.query("DELETE FROM venues WHERE id=$1 RETURNING id", [req.params.id]);
   if (r.rowCount === 0) return reply.code(404).send({ error: "Not found" });
   return { ok: true };
@@ -785,7 +799,7 @@ app.put("/events/:id", { preHandler: requireRole(ADMIN_ROLES) }, async (req, rep
   return r.rows[0];
 });
 
-app.delete("/events/:id", { preHandler: requireRole(ADMIN_ROLES) }, async (req, reply) => {
+app.delete("/events/:id", { preHandler: [requireRole(ADMIN_ROLES), demoBlock] }, async (req, reply) => {
   const r = await pool.query("DELETE FROM events WHERE id=$1 RETURNING id", [req.params.id]);
   if (r.rowCount === 0) return reply.code(404).send({ error: "Not found" });
   return { ok: true };
@@ -816,6 +830,17 @@ app.post("/menu", { preHandler: requireRole(ADMIN_ROLES) }, async (req) => {
 
 app.put("/menu/:id", { preHandler: requireRole(ADMIN_ROLES) }, async (req, reply) => {
   const m = req.body || {};
+
+  // DEMO_MODE: require explicit confirmation for price changes
+  if (DEMO_MODE && m.price !== undefined) {
+    const current = await pool.query("SELECT price FROM menu_items WHERE id=$1", [req.params.id]);
+    if (current.rowCount > 0 && Number(current.rows[0].price) !== Number(m.price)) {
+      if (!m.confirm_price_change) {
+        return reply.code(400).send({ error: "PRICE_CHANGE_REQUIRES_CONFIRM", current_price: current.rows[0].price, new_price: m.price });
+      }
+    }
+  }
+
   const r = await pool.query(
     `UPDATE menu_items SET name=COALESCE($1,name), category=COALESCE($2,category), price=COALESCE($3,price),
      icon=COALESCE($4,icon), color=COALESCE($5,color), inventory_item_id=COALESCE($6,inventory_item_id),
@@ -826,7 +851,7 @@ app.put("/menu/:id", { preHandler: requireRole(ADMIN_ROLES) }, async (req, reply
   return r.rows[0];
 });
 
-app.delete("/menu/:id", { preHandler: requireRole(ADMIN_ROLES) }, async (req, reply) => {
+app.delete("/menu/:id", { preHandler: [requireRole(ADMIN_ROLES), demoBlock] }, async (req, reply) => {
   const r = await pool.query("UPDATE menu_items SET active=false WHERE id=$1 RETURNING id", [req.params.id]);
   if (r.rowCount === 0) return reply.code(404).send({ error: "Not found" });
   return { ok: true };
@@ -935,9 +960,15 @@ app.post("/orders", { preHandler: requireRole(["BAR"]) }, async (req, reply) => 
       );
 
       // 7) Sale log
+      const sellPayload = { order_id: o.rows[0].id, items: resolvedItems, total, payment_method: payment_method || "cash" };
+      if (DEMO_MODE) {
+        sellPayload.demo_mode = true;
+        sellPayload.staff_role = req.user.role;
+        sellPayload.timestamp_iso = new Date().toISOString();
+      }
       await client.query(
         "INSERT INTO logs (venue_id, type, payload) VALUES ($1, 'SELL', $2)",
-        [venue_id, JSON.stringify({ order_id: o.rows[0].id, items: resolvedItems, total, payment_method: payment_method || "cash" })]
+        [venue_id, JSON.stringify(sellPayload)]
       );
 
       return o.rows[0];
@@ -968,7 +999,7 @@ app.get("/orders/:venue_id", { preHandler: requireRole(["BAR", ...ADMIN_ROLES]) 
   return r.rows;
 });
 
-app.delete("/orders/:id", { preHandler: requireRole(["BAR"]) }, async (req, reply) => {
+app.delete("/orders/:id", { preHandler: [requireRole(["BAR"]), demoBlock] }, async (req, reply) => {
   // Undo within 60 seconds
   const r = await pool.query(
     "SELECT * FROM orders WHERE id=$1 AND created_at > now() - interval '60 seconds'",
