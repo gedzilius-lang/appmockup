@@ -390,6 +390,40 @@ created new menu items, the OS bar POS could receive cached responses missing th
 | d0f72c2 | Fix deadlock: sort inventory items by ID |
 | 7ee6271 | Add OPS Runbook |
 
+## Priority 0–6 Implementation (2026-02-18)
+
+### Commits
+| Hash | Description |
+|------|-------------|
+| af3039e | Fix: guest end-session 400 Bad Request |
+| 5f89a38 | Fix: detect expired staff tokens + redirect to login |
+| c3e98b8 | Move wallet top-up from Security to Admin only |
+| fd25955 | Security door flow: scan preview before check-in |
+| 7a58ee9 | Mandatory NFC payment at Bar POS |
+| 31c4633 | Runner: two-panel layout, restock action, top products |
+| b931d3e | Admin: inventory auto-refresh, activity log, display order tooltip |
+| 715cb48 | Prevent screen sleep on ops pages (Wake Lock API) |
+
+### Changes Summary
+| Priority | Feature | Status |
+|----------|---------|--------|
+| 0.1 | Guest End Session fix (empty body → 400) | DONE |
+| 0.2 | Staff token expiry → auto-redirect to login | DONE |
+| 1 | Top-up moved to Admin only (MAIN_ADMIN/VENUE_ADMIN) | DONE |
+| 2 | Security door flow: NFC scan → preview → Check In/Decline | DONE |
+| 3 | Mandatory NFC payment at Bar POS (cart→confirm→tap→submit) | DONE |
+| 4 | Runner: two-panel layout, restock, top products chart | DONE |
+| 5 | Admin: inventory 10s polling, activity log search+highlights | DONE |
+| 6 | Wake Lock API on all ops pages | DONE |
+
+### Key API Changes
+- `POST /orders` now accepts `uid_tag` → resolves active session → wallet payment
+- `POST /wallet/topup` restricted to ADMIN_ROLES only
+- `POST /inventory/:venue_id/:id/restock` new endpoint for RUNNER role
+- `POST /guest/checkout` now logs CHECKOUT event
+
 ## Next Steps
-1. **USER ACTION NEEDED**: Browser test of offline UX + confirm bar/security still work
-2. Next ops plan commits as directed
+1. **USER ACTION NEEDED**: Deploy to VPS (`bash scripts/deploy.sh`)
+2. Browser-test NFC payment flow on Android Chrome
+3. Verify security door preview with real NFC tags
+4. Layer 2 planning (quests, profiles, gamification)
