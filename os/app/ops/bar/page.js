@@ -16,6 +16,7 @@ export default function BarPOS() {
   const [loading, setLoading] = useState(true);
   const [isMobile, setIsMobile] = useState(false);
   const [submitting, setSubmitting] = useState(false);
+  const [confirmingOrder, setConfirmingOrder] = useState(false);
 
   const token = typeof window !== "undefined" ? localStorage.getItem("pwl_token") : null;
   const venueId = typeof window !== "undefined" ? localStorage.getItem("pwl_venue_id") : null;
@@ -77,7 +78,7 @@ export default function BarPOS() {
     );
   }
 
-  function clearCart() { setCart([]); }
+  function clearCart() { setCart([]); setConfirmingOrder(false); }
 
   const cartTotal = cart.reduce((sum, c) => sum + c.price * c.qty, 0);
   const cartCount = cart.reduce((sum, c) => sum + c.qty, 0);
@@ -90,6 +91,11 @@ export default function BarPOS() {
 
   async function submitOrder() {
     if (cart.length === 0 || submitting) return;
+    if (cartTotal >= 200 && !confirmingOrder) {
+      setConfirmingOrder(true);
+      return;
+    }
+    setConfirmingOrder(false);
     setSubmitting(true);
     try {
       const orderItems = cart.map(c => ({
@@ -213,9 +219,35 @@ export default function BarPOS() {
       </div>
 
       <div style={{ borderTop: "1px solid #1e293b", marginTop: "0.5rem", paddingTop: "0.5rem" }}>
-        <button onClick={submitOrder} disabled={submitting} className="btn-confirm">
-          {submitting ? "Confirming..." : `Confirm Order — ${cartTotal} NC`}
-        </button>
+        {confirmingOrder ? (
+          <div>
+            <div style={{
+              padding: "0.5rem 0.75rem",
+              marginBottom: "0.5rem",
+              borderRadius: "0.5rem",
+              background: "#f9731615",
+              border: "1px solid #f9731640",
+              color: "#f97316",
+              fontSize: "0.8rem",
+              fontWeight: 600,
+              textAlign: "center",
+            }}>
+              High-value order: {cartTotal} NC. Confirm?
+            </div>
+            <div style={{ display: "flex", gap: "0.5rem" }}>
+              <button onClick={() => setConfirmingOrder(false)} className="btn-secondary btn-press" style={{ flex: 1 }}>
+                Cancel
+              </button>
+              <button onClick={submitOrder} disabled={submitting} className="btn-danger btn-press" style={{ flex: 1, fontWeight: 800 }}>
+                {submitting ? "..." : `Confirm ${cartTotal} NC`}
+              </button>
+            </div>
+          </div>
+        ) : (
+          <button onClick={submitOrder} disabled={submitting} className="btn-confirm">
+            {submitting ? "Confirming..." : `Confirm Order — ${cartTotal} NC`}
+          </button>
+        )}
       </div>
     </div>
   );

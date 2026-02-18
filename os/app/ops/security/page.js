@@ -46,6 +46,8 @@ export default function SecurityPage() {
   const [topupSuccess, setTopupSuccess] = useState(null);
   // Validation
   const [topupErrors, setTopupErrors] = useState({});
+  // High-value confirmation
+  const [pendingHighValue, setPendingHighValue] = useState(false);
   // NFC
   const [scanning, setScanning] = useState(false);
   const [scanCtrl, setScanCtrl] = useState(null);
@@ -146,6 +148,12 @@ export default function SecurityPage() {
   async function topUp() {
     if (!validateTopup()) return;
     const amt = Number(topupAmount);
+    if (amt >= 200 && !pendingHighValue) {
+      setPendingHighValue(true);
+      showToast(`High value: ${amt} NC — press again to confirm`, "error");
+      return;
+    }
+    setPendingHighValue(false);
     setTopupLoading(true);
     setTopupSuccess(null);
     try {
@@ -180,6 +188,7 @@ export default function SecurityPage() {
   function selectQuickAmount(amt) {
     setTopupAmount(String(amt));
     setTopupErrors(prev => ({ ...prev, amount: false }));
+    setPendingHighValue(false);
   }
 
   useEffect(() => { load(); }, []);
@@ -263,7 +272,7 @@ export default function SecurityPage() {
             placeholder="Amount (NC)"
             min="1"
             value={topupAmount}
-            onChange={e => { setTopupAmount(e.target.value); setTopupErrors(prev => ({ ...prev, amount: false })); }}
+            onChange={e => { setTopupAmount(e.target.value); setTopupErrors(prev => ({ ...prev, amount: false })); setPendingHighValue(false); }}
             onKeyDown={e => e.key === "Enter" && topUp()}
             className={topupErrors.amount ? "input-error" : ""}
             style={{ flex: 1, fontSize: "1rem", fontWeight: 700, padding: "0.5rem 0.65rem" }}
@@ -271,12 +280,28 @@ export default function SecurityPage() {
           <button
             onClick={topUp}
             disabled={topupLoading}
-            className="btn-confirm btn-press"
+            className={`${pendingHighValue ? "btn-danger" : "btn-confirm"} btn-press`}
             style={{ width: "auto", padding: "0.5rem 1.5rem", fontSize: "0.9rem" }}
           >
-            {topupLoading ? "..." : "Top Up"}
+            {topupLoading ? "..." : pendingHighValue ? `Confirm ${topupAmount} NC` : "Top Up"}
           </button>
         </div>
+
+        {/* High-value warning */}
+        {pendingHighValue && (
+          <div style={{
+            marginTop: "0.5rem",
+            padding: "0.5rem 0.75rem",
+            borderRadius: "0.5rem",
+            background: "#f9731615",
+            border: "1px solid #f9731640",
+            color: "#f97316",
+            fontSize: "0.8rem",
+            fontWeight: 600,
+          }}>
+            High-value top-up ({topupAmount} NC). Press confirm to proceed.
+          </div>
+        )}
 
         {/* Success message */}
         {topupSuccess && (
