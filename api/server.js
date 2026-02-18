@@ -1229,6 +1229,29 @@ app.put("/inventory/:venue_id/:id", { preHandler: requireRole(ADMIN_ROLES) }, as
   return r.rows[0];
 });
 
+// ─── Runner Restock ─────────────────────────────────────────
+app.post("/inventory/:venue_id/:id/restock", {
+  preHandler: requireRole(["RUNNER", ...ADMIN_ROLES])
+}, async (req, reply) => {
+  if (!canAccessVenue(req.user, req.params.venue_id)) return reply.code(403).send({ error: "Forbidden" });
+  const { add_qty } = req.body || {};
+  const addQty = Number(add_qty);
+  if (!addQty || addQty <= 0) return reply.code(400).send({ error: "add_qty must be positive" });
+
+  const r = await pool.query(
+    "UPDATE inventory SET qty = qty + $1, max_qty = GREATEST(max_qty, qty + $1), updated_at = now() WHERE id = $2 AND venue_id = $3 RETURNING *",
+    [addQty, req.params.id, req.params.venue_id]
+  );
+  if (r.rowCount === 0) return reply.code(404).send({ error: "Inventory item not found" });
+
+  await pool.query(
+    "INSERT INTO logs (venue_id, type, payload) VALUES ($1, 'RESTOCK', $2)",
+    [req.params.venue_id, JSON.stringify({ item: r.rows[0].item, add_qty: addQty, qty_after: r.rows[0].qty, staff_id: req.user.uid })]
+  );
+
+  return r.rows[0];
+});
+
 // Legacy sell action (kept for backward compatibility)
 // Legacy endpoint — replaced by POST /orders (transactional)
 app.post("/actions/sell", { preHandler: requireAuth }, async (req, reply) => {
