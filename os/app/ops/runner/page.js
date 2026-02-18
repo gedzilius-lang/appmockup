@@ -1,6 +1,7 @@
 "use client";
 import { useEffect, useState, useRef } from "react";
 import { apiFetch as sharedApiFetch } from "../../lib/api";
+import { useWakeLock } from "../../lib/useWakeLock";
 
 function timeAgo(dateStr) {
   const diff = Date.now() - new Date(dateStr).getTime();
@@ -28,6 +29,7 @@ export default function RunnerPage() {
 
   const token = typeof window !== "undefined" ? localStorage.getItem("pwl_token") : null;
   const venueId = typeof window !== "undefined" ? localStorage.getItem("pwl_venue_id") : null;
+  useWakeLock();
 
   function showToast(message, type = "info") {
     setToast({ message, type });

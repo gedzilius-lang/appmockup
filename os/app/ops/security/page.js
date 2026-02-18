@@ -3,6 +3,7 @@ import { useEffect, useState } from "react";
 import { isNfcSupported, scanUidOnce } from "../../lib/nfc";
 import { useNetworkStatus } from "../../lib/useNetworkStatus";
 import { apiFetch } from "../../lib/api";
+import { useWakeLock } from "../../lib/useWakeLock";
 
 const TYPE_COLORS = {
   SELL: { bg: "#06b6d420", color: "#06b6d4", border: "#06b6d440" },
@@ -50,6 +51,7 @@ export default function SecurityPage() {
 
   const token = typeof window !== "undefined" ? localStorage.getItem("pwl_token") : null;
   const venueId = typeof window !== "undefined" ? localStorage.getItem("pwl_venue_id") : null;
+  useWakeLock();
 
   function showToast(message, type = "info") {
     setToast({ message, type });

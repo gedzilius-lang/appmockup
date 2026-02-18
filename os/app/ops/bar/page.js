@@ -3,6 +3,7 @@ import { useEffect, useState } from "react";
 import { useNetworkStatus } from "../../lib/useNetworkStatus";
 import { apiFetch as sharedApiFetch } from "../../lib/api";
 import { isNfcSupported, scanUidOnce } from "../../lib/nfc";
+import { useWakeLock } from "../../lib/useWakeLock";
 
 export default function BarPOS() {
   const [menu, setMenu] = useState([]);
@@ -19,6 +20,7 @@ export default function BarPOS() {
   const [submitting, setSubmitting] = useState(false);
   const [lastFailedOrder, setLastFailedOrder] = useState(null);
   const networkOnline = useNetworkStatus();
+  useWakeLock();
 
   // NFC payment state
   const nfcAvailable = typeof window !== "undefined" && isNfcSupported();
