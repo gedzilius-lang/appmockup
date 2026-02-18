@@ -286,11 +286,56 @@ created new menu items, the OS bar POS could receive cached responses missing th
 - **User must do real browser testing** on phone/desktop to confirm interactive behavior
 - Tested from VPS only; company proxy blocks local machine access
 
+## COMMIT 3 — Poor-Network UX (deployed 2026-02-18)
+
+### Changes
+- **`os/app/lib/useNetworkStatus.js`** (new): Hook polls `/api/health` every 10s with 5s timeout. Returns boolean `online`. Silent — no console spam or toasts on poll failure.
+- **`os/app/api/health/route.js`** (new): Static Next.js route returning `{"ok":true}`. Pre-rendered at build time (zero server cost).
+- **`os/app/ops/bar/page.js`**: Red offline banner with "Retry Last Order" button when `lastFailedOrder` exists. Confirm buttons disabled when offline. `submitOrder()` early-returns with toast if offline. Failed orders saved to `lastFailedOrder` state for retry.
+- **`os/app/ops/security/page.js`**: Red offline banner at top when offline. Top Up button disabled when offline. `topUp()` early-returns with toast if offline.
+
+### How to Test Offline
+1. SSH to VPS: `ssh nite-core`
+2. Stop API: `docker compose -f /opt/pwl-os/appmockup/docker-compose.yml stop api`
+3. In browser on `/ops/bar`:
+   - Banner "Network unavailable" appears within 10s
+   - Confirm button disabled
+   - Attempt submit → toast "Cannot submit — network unavailable"
+4. On `/ops/security`:
+   - Banner "Network unavailable" appears within 10s
+   - Top Up button disabled
+5. Restore API: `docker compose -f /opt/pwl-os/appmockup/docker-compose.yml start api`
+   - Banners clear within 10–20s
+6. Failed order retry:
+   - With API down, attempt order → fails → banner shows "Retry Last Order"
+   - Click → cart restored
+   - Bring API back → submit succeeds
+
+### Verification (VPS, 2026-02-18)
+- [x] Health endpoint responds `{"ok":true}` inside container
+- [x] Health endpoint responds through nginx (`curl -sk https://localhost/api/health -H 'Host: os.peoplewelike.club'`)
+- [x] Build output shows `/api/health` as `○` (static, prerendered)
+- [x] OS container running, build succeeded with 0 errors
+- [ ] Browser offline simulation (USER ACTION NEEDED)
+
+## COMMIT 4 — Minimal Monitoring (deployed 2026-02-18)
+
+### Changes
+- **In-memory metrics** in `api/server.js`: request/error counts, last 5 errors (capped), order latencies (capped 100), 5-min rolling window with auto-reset
+- **Fastify hooks**: `onRequest` (count + start time), `onResponse` (5xx tracking), `onError` (error capture — method/url/status/message only, no secrets)
+- **Order latency**: measured around `withTx` in POST /orders, SLOW_ORDER log inserted if >500ms (try/catch wrapped, never breaks orders)
+- **GET /status** (MAIN_ADMIN only): uptime, window, rates, error list, avg/p95 latency, recent latencies, config flags, db pool stats
+
+### Verification (VPS, 2026-02-18)
+- [x] `GET /health` → `{"ok":true}`
+- [x] `GET /status` without auth → 401 Missing token
+- [x] `GET /status` as BAR → 403 Forbidden
+- [x] `GET /status` as MAIN_ADMIN → full metrics JSON
+- [x] After placing order: `avg_order_latency_ms: 8`, `recent_order_latencies: [8]`
+- [x] Request count incrementing correctly (6 → 11 after test calls)
+- [x] DB pool stats: totalCount=1, idleCount=1, waitingCount=0
+- [x] No sensitive data in response (no tokens, passwords, secrets)
+
 ## Next Steps
-1. **USER ACTION NEEDED**: Real browser test on phone (Android Chrome) + desktop Chrome
-   - Open `os.peoplewelike.club/ops`, log in as Bar with PIN, place an order
-   - Open `/ops/security`, test quick chips + topup flow
-   - Open `/guest`, check in, verify wallet display
-   - Open `admin.peoplewelike.club/login`, verify form styling
-2. Phase 1 hardening (nginx gzip/headers/cache, health endpoints, DB integrity checks)
-3. Phase 2 planning (after verification + hardening)
+1. COMMIT 5: Permission Tightening
+2. **USER ACTION NEEDED**: Browser test of offline UX on phone

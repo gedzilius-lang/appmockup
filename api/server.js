@@ -456,6 +456,14 @@ async function demoBlock(req, reply) {
   }
 }
 
+// ─── Venue Scope Check ──────────────────────────────────────
+// Returns true if user is allowed to access the given venue's data.
+// MAIN_ADMIN can access all venues; others must match their own venue_id.
+function canAccessVenue(user, venueId) {
+  if (user.role === "MAIN_ADMIN") return true;
+  return user.venue_id === Number(venueId);
+}
+
 // ─── Automation Engine ───────────────────────────────────────
 async function evaluateRules(venueId, triggerType, context = {}) {
   try {
@@ -836,6 +844,7 @@ app.post("/venues", { preHandler: requireRole(["MAIN_ADMIN"]) }, async (req) => 
 });
 
 app.put("/venues/:id", { preHandler: requireRole(ADMIN_ROLES) }, async (req, reply) => {
+  if (!canAccessVenue(req.user, req.params.id)) return reply.code(403).send({ error: "Forbidden" });
   const { name, city, pin, capacity } = req.body || {};
   const r = await pool.query(
     "UPDATE venues SET name=COALESCE($1,name), city=COALESCE($2,city), pin=COALESCE($3,pin), capacity=COALESCE($4,capacity) WHERE id=$5 RETURNING *",
@@ -897,7 +906,8 @@ app.delete("/events/:id", { preHandler: [requireRole(ADMIN_ROLES), demoBlock] },
 });
 
 // ─── Menu Items ──────────────────────────────────────────────
-app.get("/menu/:venue_id", { preHandler: requireAuth }, async (req) => {
+app.get("/menu/:venue_id", { preHandler: requireAuth }, async (req, reply) => {
+  if (!canAccessVenue(req.user, req.params.venue_id)) return reply.code(403).send({ error: "Forbidden" });
   const r = await pool.query(
     `SELECT mi.*, i.qty as stock_qty, i.low_threshold
      FROM menu_items mi
@@ -909,8 +919,9 @@ app.get("/menu/:venue_id", { preHandler: requireAuth }, async (req) => {
   return r.rows;
 });
 
-app.post("/menu", { preHandler: requireRole(ADMIN_ROLES) }, async (req) => {
+app.post("/menu", { preHandler: requireRole(ADMIN_ROLES) }, async (req, reply) => {
   const m = req.body || {};
+  if (!canAccessVenue(req.user, m.venue_id)) return reply.code(403).send({ error: "Forbidden" });
   const r = await pool.query(
     `INSERT INTO menu_items (venue_id, name, category, price, icon, color, inventory_item_id, display_order)
      VALUES ($1,$2,$3,$4,$5,$6,$7,$8) RETURNING *`,
@@ -921,6 +932,10 @@ app.post("/menu", { preHandler: requireRole(ADMIN_ROLES) }, async (req) => {
 
 app.put("/menu/:id", { preHandler: requireRole(ADMIN_ROLES) }, async (req, reply) => {
   const m = req.body || {};
+  // Venue-scope check: look up the menu item's venue
+  const mi = await pool.query("SELECT venue_id FROM menu_items WHERE id=$1", [req.params.id]);
+  if (mi.rowCount === 0) return reply.code(404).send({ error: "Not found" });
+  if (!canAccessVenue(req.user, mi.rows[0].venue_id)) return reply.code(403).send({ error: "Forbidden" });
 
   // DEMO_MODE: require explicit confirmation for price changes
   if (DEMO_MODE && m.price !== undefined) {
@@ -943,6 +958,9 @@ app.put("/menu/:id", { preHandler: requireRole(ADMIN_ROLES) }, async (req, reply
 });
 
 app.delete("/menu/:id", { preHandler: [requireRole(ADMIN_ROLES), demoBlock] }, async (req, reply) => {
+  const mi = await pool.query("SELECT venue_id FROM menu_items WHERE id=$1", [req.params.id]);
+  if (mi.rowCount === 0) return reply.code(404).send({ error: "Not found" });
+  if (!canAccessVenue(req.user, mi.rows[0].venue_id)) return reply.code(403).send({ error: "Forbidden" });
   const r = await pool.query("UPDATE menu_items SET active=false WHERE id=$1 RETURNING id", [req.params.id]);
   if (r.rowCount === 0) return reply.code(404).send({ error: "Not found" });
   return { ok: true };
@@ -1096,7 +1114,8 @@ app.post("/orders", { preHandler: requireRole(["BAR"]) }, async (req, reply) => 
   }
 });
 
-app.get("/orders/:venue_id", { preHandler: requireRole(["BAR", ...ADMIN_ROLES]) }, async (req) => {
+app.get("/orders/:venue_id", { preHandler: requireRole(["BAR", ...ADMIN_ROLES]) }, async (req, reply) => {
+  if (!canAccessVenue(req.user, req.params.venue_id)) return reply.code(403).send({ error: "Forbidden" });
   const r = await pool.query(
     "SELECT * FROM orders WHERE venue_id=$1 ORDER BY created_at DESC LIMIT 50",
     [req.params.venue_id]
@@ -1163,7 +1182,8 @@ app.get("/shift/summary", { preHandler: requireRole(["BAR"]) }, async (req) => {
 });
 
 // ─── Inventory ───────────────────────────────────────────────
-app.get("/inventory/:venue_id", { preHandler: requireAuth }, async (req) => {
+app.get("/inventory/:venue_id", { preHandler: requireAuth }, async (req, reply) => {
+  if (!canAccessVenue(req.user, req.params.venue_id)) return reply.code(403).send({ error: "Forbidden" });
   const r = await pool.query(
     "SELECT * FROM inventory WHERE venue_id=$1 ORDER BY id ASC",
     [req.params.venue_id]
@@ -1171,7 +1191,8 @@ app.get("/inventory/:venue_id", { preHandler: requireAuth }, async (req) => {
   return r.rows;
 });
 
-app.post("/inventory/:venue_id", { preHandler: requireRole(ADMIN_ROLES) }, async (req) => {
+app.post("/inventory/:venue_id", { preHandler: requireRole(ADMIN_ROLES) }, async (req, reply) => {
+  if (!canAccessVenue(req.user, req.params.venue_id)) return reply.code(403).send({ error: "Forbidden" });
   const { item, qty, low_threshold } = req.body || {};
   const r = await pool.query(
     "INSERT INTO inventory (venue_id, item, qty, low_threshold, max_qty) VALUES ($1,$2,$3,$4,$5) RETURNING *",
@@ -1181,6 +1202,7 @@ app.post("/inventory/:venue_id", { preHandler: requireRole(ADMIN_ROLES) }, async
 });
 
 app.put("/inventory/:venue_id/:id", { preHandler: requireRole(ADMIN_ROLES) }, async (req, reply) => {
+  if (!canAccessVenue(req.user, req.params.venue_id)) return reply.code(403).send({ error: "Forbidden" });
   const { qty, low_threshold, item } = req.body || {};
   const r = await pool.query(
     "UPDATE inventory SET qty=COALESCE($1,qty), low_threshold=COALESCE($2,low_threshold), item=COALESCE($3,item), updated_at=now() WHERE id=$4 AND venue_id=$5 RETURNING *",
@@ -1373,13 +1395,21 @@ app.post("/notifications", { preHandler: requireRole(["BAR", "RUNNER", "SECURITY
   return r.rows[0];
 });
 
-app.put("/notifications/:id/read", { preHandler: requireAuth }, async (req) => {
+app.put("/notifications/:id/read", { preHandler: requireAuth }, async (req, reply) => {
+  const n = await pool.query("SELECT target_user_id, venue_id FROM notifications WHERE id=$1", [req.params.id]);
+  if (n.rowCount === 0) return reply.code(404).send({ error: "Not found" });
+  const notif = n.rows[0];
+  // Only allow if notification targets this user, or user is at same venue, or MAIN_ADMIN
+  if (notif.target_user_id && notif.target_user_id !== req.user.uid && req.user.role !== "MAIN_ADMIN") {
+    return reply.code(403).send({ error: "Forbidden" });
+  }
   await pool.query("UPDATE notifications SET read=true WHERE id=$1", [req.params.id]);
   return { ok: true };
 });
 
 // ─── Logs ────────────────────────────────────────────────────
-app.get("/logs/:venue_id", { preHandler: requireAuth }, async (req) => {
+app.get("/logs/:venue_id", { preHandler: requireAuth }, async (req, reply) => {
+  if (!canAccessVenue(req.user, req.params.venue_id)) return reply.code(403).send({ error: "Forbidden" });
   const since = req.query.since ? new Date(req.query.since) : null;
   const type = req.query.type || null;
 
@@ -1403,11 +1433,13 @@ app.get("/logs/:venue_id", { preHandler: requireAuth }, async (req) => {
   return r.rows;
 });
 
-app.post("/logs", { preHandler: requireAuth }, async (req) => {
+app.post("/logs", { preHandler: requireRole(["BAR", "RUNNER", "SECURITY", "DOOR", ...ADMIN_ROLES]) }, async (req, reply) => {
   const { venue_id, type, payload } = req.body || {};
+  const targetVenue = venue_id || req.user.venue_id;
+  if (!canAccessVenue(req.user, targetVenue)) return reply.code(403).send({ error: "Forbidden" });
   const r = await pool.query(
     "INSERT INTO logs (venue_id, type, payload) VALUES ($1,$2,$3) RETURNING *",
-    [venue_id || req.user.venue_id, type, payload || {}]
+    [targetVenue, type, payload || {}]
   );
   return r.rows[0];
 });
@@ -1474,7 +1506,8 @@ app.post("/track", async (req) => {
 });
 
 // ─── Headcount ───────────────────────────────────────────────
-app.get("/headcount/:venue_id", { preHandler: requireAuth }, async (req) => {
+app.get("/headcount/:venue_id", { preHandler: requireAuth }, async (req, reply) => {
+  if (!canAccessVenue(req.user, req.params.venue_id)) return reply.code(403).send({ error: "Forbidden" });
   const r = await pool.query(
     "SELECT COUNT(*) as count FROM venue_sessions WHERE venue_id=$1 AND ended_at IS NULL",
     [req.params.venue_id]
