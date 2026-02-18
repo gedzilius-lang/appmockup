@@ -973,7 +973,7 @@ app.delete("/menu/:id", { preHandler: [requireRole(ADMIN_ROLES), demoBlock] }, a
 
 // ─── Orders ──────────────────────────────────────────────────
 app.post("/orders", { preHandler: requireRole(["BAR"]) }, async (req, reply) => {
-  const { venue_id, items, payment_method, guest_session_id, idempotency_key } = req.body || {};
+  const { venue_id, items, payment_method, guest_session_id, uid_tag, idempotency_key } = req.body || {};
   if (!venue_id || !items || !Array.isArray(items) || items.length === 0) {
     return reply.code(400).send({ error: "venue_id and items required" });
   }
@@ -984,9 +984,20 @@ app.post("/orders", { preHandler: requireRole(["BAR"]) }, async (req, reply) => 
     if (existing.rowCount > 0) return existing.rows[0];
   }
 
-  // Resolve user_id from guest session (outside tx — read-only)
+  // Resolve user_id from uid_tag or guest_session_id (outside tx — read-only)
   let userId = null;
-  if (guest_session_id) {
+  let resolvedSessionId = guest_session_id || null;
+  if (uid_tag && !guest_session_id) {
+    const sess = await pool.query(
+      "SELECT id, user_id FROM venue_sessions WHERE uid_tag=$1 AND venue_id=$2 AND ended_at IS NULL ORDER BY started_at DESC LIMIT 1",
+      [uid_tag, venue_id]
+    );
+    if (sess.rowCount === 0) {
+      return reply.code(400).send({ error: "NO_ACTIVE_SESSION", message: "Guest must check in first" });
+    }
+    resolvedSessionId = sess.rows[0].id;
+    userId = sess.rows[0].user_id;
+  } else if (guest_session_id) {
     const sess = await pool.query("SELECT user_id FROM venue_sessions WHERE id=$1", [guest_session_id]);
     if (sess.rowCount > 0) userId = sess.rows[0].user_id;
   }
@@ -1061,10 +1072,10 @@ app.post("/orders", { preHandler: requireRole(["BAR"]) }, async (req, reply) => 
       }
 
       // 5) Update venue session spend
-      if (guest_session_id) {
+      if (resolvedSessionId) {
         await client.query(
           "UPDATE venue_sessions SET total_spend = total_spend + $1, interactions_count = interactions_count + 1 WHERE id = $2",
-          [total, guest_session_id]
+          [total, resolvedSessionId]
         );
       }
 
@@ -1072,7 +1083,7 @@ app.post("/orders", { preHandler: requireRole(["BAR"]) }, async (req, reply) => 
       const o = await client.query(
         `INSERT INTO orders (venue_id, staff_user_id, guest_session_id, items, total, payment_method, idempotency_key)
          VALUES ($1,$2,$3,$4,$5,$6,$7) RETURNING *`,
-        [venue_id, req.user.uid, guest_session_id || null, JSON.stringify(resolvedItems), total, payment_method || "cash", idempotency_key || null]
+        [venue_id, req.user.uid, resolvedSessionId || null, JSON.stringify(resolvedItems), total, payment_method || "cash", idempotency_key || null]
       );
 
       // 7) Sale log
