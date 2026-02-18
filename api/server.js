@@ -972,10 +972,15 @@ app.delete("/menu/:id", { preHandler: [requireRole(ADMIN_ROLES), demoBlock] }, a
 });
 
 // ─── Orders ──────────────────────────────────────────────────
-app.post("/orders", { preHandler: requireRole(["BAR"]) }, async (req, reply) => {
+app.post("/orders", { preHandler: requireRole(["BAR", ...ADMIN_ROLES]) }, async (req, reply) => {
   const { venue_id, items, payment_method, guest_session_id, uid_tag, idempotency_key } = req.body || {};
   if (!venue_id || !items || !Array.isArray(items) || items.length === 0) {
     return reply.code(400).send({ error: "venue_id and items required" });
+  }
+
+  // BAR role MUST provide uid_tag (NFC tap) to identify the payer
+  if (req.user.role === "BAR" && !uid_tag) {
+    return reply.code(400).send({ error: "NFC_REQUIRED", message: "NFC tap required to identify payer" });
   }
 
   // Idempotency check BEFORE transaction

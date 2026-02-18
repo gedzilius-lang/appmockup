@@ -92,7 +92,7 @@ export default function BarPOS() {
         submitOrderWithUid(uid);
       },
       onError: (err) => {
-        showToast(err.message || "NFC scan failed", "error");
+        showToast("NFC read failed — try again", "error");
         setPayState("normal");
       },
     });
@@ -142,7 +142,8 @@ export default function BarPOS() {
       const d = err.data || {};
       const msg = d.error === "OUT_OF_STOCK" ? `Out of stock: ${d.item}` :
                   d.error === "INSUFFICIENT_FUNDS" ? `Insufficient funds (need ${d.required} NC, have ${d.balance} NC)` :
-                  d.error === "NO_ACTIVE_SESSION" ? "Guest must check in first" :
+                  d.error === "NO_ACTIVE_SESSION" ? "No active session — guest must check in at door first" :
+                  d.error === "NFC_REQUIRED" ? "NFC tap required to identify payer" :
                   err.message || "Order failed";
       showToast(msg, "error");
       setLastFailedOrder([...cart]);
@@ -216,10 +217,10 @@ export default function BarPOS() {
         }}>
           <div style={{ fontSize: "2rem", marginBottom: "0.75rem" }}>&#x26A0;</div>
           <div style={{ fontSize: "1.1rem", fontWeight: 700, color: "#ef4444", marginBottom: "0.5rem" }}>
-            NFC Required
+            This device cannot take payments
           </div>
           <div style={{ fontSize: "0.85rem", color: "#94a3b8", marginBottom: "1rem" }}>
-            This device must support NFC to take payments. Use an NFC-enabled Android phone with Chrome.
+            NFC is required to identify the paying guest. Use an NFC-enabled Android device with Chrome.
           </div>
           <button onClick={() => { window.location.href = "/ops"; }} className="btn-secondary btn-press">
             Back to Ops
