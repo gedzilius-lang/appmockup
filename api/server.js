@@ -34,6 +34,59 @@ async function withTx(fn) {
 
 const JWT_SECRET = process.env.JWT_SECRET;
 
+// ─── Metrics (in-memory, bounded) ────────────────────────────
+const metrics = {
+  startedAt: Date.now(),
+  windowStart: Date.now(),
+  requestCount: 0,
+  errorCount: 0,
+  lastErrors: [],          // cap 5
+  orderLatenciesMs: [],    // cap 100
+};
+
+function resetMetricsIfStale() {
+  if (Date.now() - metrics.windowStart > 5 * 60 * 1000) {
+    metrics.windowStart = Date.now();
+    metrics.requestCount = 0;
+    metrics.errorCount = 0;
+    metrics.lastErrors.length = 0;
+    metrics.orderLatenciesMs.length = 0;
+  }
+}
+
+// Hooks: request counting + error tracking
+app.addHook("onRequest", async (req) => {
+  resetMetricsIfStale();
+  req._startTime = Date.now();
+  metrics.requestCount++;
+});
+
+app.addHook("onResponse", async (req, reply) => {
+  if (reply.statusCode >= 500) {
+    metrics.errorCount++;
+    metrics.lastErrors.push({
+      ts: new Date().toISOString(),
+      method: req.method,
+      url: req.url,
+      statusCode: reply.statusCode,
+      message: "5xx response",
+    });
+    if (metrics.lastErrors.length > 5) metrics.lastErrors.shift();
+  }
+});
+
+app.addHook("onError", async (req, reply, error) => {
+  metrics.errorCount++;
+  metrics.lastErrors.push({
+    ts: new Date().toISOString(),
+    method: req.method,
+    url: req.url,
+    statusCode: reply.statusCode || 500,
+    message: String(error.message || "").slice(0, 200),
+  });
+  if (metrics.lastErrors.length > 5) metrics.lastErrors.shift();
+});
+
 app.get("/", () => ({ status: "ok", service: "pwl-api" }));
 
 // ─── XP Helpers ──────────────────────────────────────────────
@@ -454,6 +507,44 @@ app.get("/debug/dbpool", { preHandler: requireRole(ADMIN_ROLES) }, async () => (
   idleCount: pool.idleCount,
   waitingCount: pool.waitingCount,
 }));
+
+app.get("/status", { preHandler: requireRole(["MAIN_ADMIN"]) }, async () => {
+  const nowMs = Date.now();
+  const windowSec = (nowMs - metrics.windowStart) / 1000;
+  const uptimeSec = (nowMs - metrics.startedAt) / 1000;
+  const perMin = windowSec > 0 ? 60 / windowSec : 0;
+
+  // Latency stats
+  const lats = metrics.orderLatenciesMs;
+  let avgLatency = 0;
+  let p95Latency = 0;
+  if (lats.length > 0) {
+    avgLatency = Math.round(lats.reduce((a, b) => a + b, 0) / lats.length);
+    const sorted = [...lats].sort((a, b) => a - b);
+    p95Latency = sorted[Math.floor(sorted.length * 0.95)] || sorted[sorted.length - 1];
+  }
+
+  return {
+    ok: true,
+    uptime_s: Math.round(uptimeSec),
+    window_seconds: Math.round(windowSec),
+    requests_per_min: Math.round(metrics.requestCount * perMin * 10) / 10,
+    errors_per_min: Math.round(metrics.errorCount * perMin * 10) / 10,
+    requestCount: metrics.requestCount,
+    errorCount: metrics.errorCount,
+    last_5_errors: metrics.lastErrors,
+    avg_order_latency_ms: avgLatency,
+    p95_order_latency_ms: p95Latency,
+    recent_order_latencies: lats.slice(-10),
+    demo_mode: DEMO_MODE,
+    feature_layer: FEATURE_LAYER,
+    db_pool: {
+      totalCount: pool.totalCount,
+      idleCount: pool.idleCount,
+      waitingCount: pool.waitingCount,
+    },
+  };
+});
 
 // ─── Auth ────────────────────────────────────────────────────
 app.post("/auth/login", async (req, reply) => {
@@ -878,6 +969,7 @@ app.post("/orders", { preHandler: requireRole(["BAR"]) }, async (req, reply) => 
   }
 
   try {
+    const _orderStart = Date.now();
     const order = await withTx(async (client) => {
       // 1) Resolve menu items server-side — do NOT trust client prices
       const resolvedItems = [];
@@ -973,6 +1065,19 @@ app.post("/orders", { preHandler: requireRole(["BAR"]) }, async (req, reply) => 
 
       return o.rows[0];
     });
+
+    // Track order latency
+    const _orderMs = Date.now() - _orderStart;
+    metrics.orderLatenciesMs.push(_orderMs);
+    if (metrics.orderLatenciesMs.length > 100) metrics.orderLatenciesMs.shift();
+    if (_orderMs > 500) {
+      try {
+        await pool.query(
+          "INSERT INTO logs (venue_id, type, payload) VALUES ($1, 'SLOW_ORDER', $2)",
+          [venue_id, JSON.stringify({ latency_ms: _orderMs, venue_id, staff_user_id: req.user.uid, order_id: order.id })]
+        );
+      } catch (_) { /* never break orders for logging */ }
+    }
 
     // Fire-and-forget outside tx: XP award + rule evaluation
     if (userId && payment_method === "wallet") {
