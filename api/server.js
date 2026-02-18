@@ -1026,7 +1026,8 @@ app.post("/orders", { preHandler: requireRole(["BAR"]) }, async (req, reply) => 
         }
       }
 
-      // 3) Decrement inventory with stock guards
+      // 3) Decrement inventory with stock guards (sorted by id to prevent deadlocks)
+      resolvedItems.sort((a, b) => (a.inventory_item_id || 0) - (b.inventory_item_id || 0));
       for (const ri of resolvedItems) {
         if (ri.inventory_item_id) {
           const inv = await client.query(
