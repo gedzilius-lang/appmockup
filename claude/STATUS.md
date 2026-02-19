@@ -134,10 +134,34 @@ created new menu items, the OS bar POS could receive cached responses missing th
 | bb4c106 | P1.3: runner stock + progress bars |
 | a9661ea | P2: guest Layer 2 profile (gated) |
 
+## Current State Snapshot (2026-02-19)
+
+| Item | Value |
+|------|-------|
+| **Latest deployed commit** | `d96d650` (Policy: enforce NFC-required payer for BAR orders) |
+| **NFC policy** | Enforced — Bar POS requires wristband tap before payment |
+| **Backup location** | `backups/db_pwlos_20260219_011632.sql.gz` (11K, verified restore) |
+| **Deploy command** | `cd /opt/pwl-os/appmockup && bash scripts/deploy.sh` |
+| **Monitoring** | `GET /status` (MAIN_ADMIN auth required) |
+| **Health check** | `GET /health` → `{"ok":true}` |
+| **Feature layer** | 1 (Layer 2 gated off) |
+
+### Role Permissions Summary
+
+| Role | Capabilities |
+|------|-------------|
+| MAIN_ADMIN | All venues, all endpoints, /status, /debug/dbpool, wallet top-up |
+| VENUE_ADMIN | Own venue management, menu/inventory CRUD, wallet top-up |
+| BAR | Own venue POS orders (NFC required), menu read |
+| SECURITY | Own venue check-in/out, UID history lookup |
+| DOOR | Own venue check-in/out, UID history lookup |
+| RUNNER | Own venue inventory view, restock action |
+
 ## Next Steps
-1. **User browser testing** needed for all changes above
-2. Cross-cutting: NGINX hardening (gzip, security headers, static cache)
-3. Cross-cutting: DB integrity verify checklist
+1. **Simulation night** — full end-to-end test with real devices
+2. Bugfix-only phase — fixes from simulation only
+3. Uptime monitoring — external alerting
+4. First real venue validation
 
 ## Services (all running on VPS)
 - **API** — Fastify on port 4000 (server.js)
