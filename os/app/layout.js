@@ -29,8 +29,9 @@ function NavInner() {
       </a>
       <div style={{ display: "flex", gap: "1rem", marginLeft: "auto", alignItems: "center" }}>
         <a href="/radio" style={{ fontSize: "0.85rem", color: "#64748b", textDecoration: "none", padding: "0.25rem 0", borderBottom: "2px solid transparent", transition: "all 0.2s" }}>Radio</a>
+        <a href="/apply" style={{ fontSize: "0.85rem", color: "#64748b", textDecoration: "none", padding: "0.25rem 0", borderBottom: "2px solid transparent", transition: "all 0.2s" }}>Sell</a>
+        <a href="/vendor" style={{ fontSize: "0.85rem", color: "#64748b", textDecoration: "none", padding: "0.25rem 0", borderBottom: "2px solid transparent", transition: "all 0.2s" }}>Vendor</a>
         <a href="/ops" style={{ fontSize: "0.85rem", color: "#64748b", textDecoration: "none", padding: "0.25rem 0", borderBottom: "2px solid transparent", transition: "all 0.2s" }}>Ops</a>
-        <a href="/guest" style={{ fontSize: "0.85rem", color: "#64748b", textDecoration: "none", padding: "0.25rem 0", borderBottom: "2px solid transparent", transition: "all 0.2s" }}>Guest</a>
         <a href="https://admin.peoplewelike.club" target="_blank" style={{ fontSize: "0.75rem", color: "#0a0a0f", textDecoration: "none", background: "#a855f7", padding: "0.3rem 0.75rem", borderRadius: "0.375rem", fontWeight: 600 }}>Admin</a>
       </div>
     </nav>
@@ -46,6 +47,18 @@ export default function RootLayout({ children }) {
           <div style={{ maxWidth: 960, margin: "0 auto", padding: "1.5rem 1rem" }}>
             {children}
           </div>
+          <footer style={{ borderTop: "1px solid #1e1e2e", marginTop: "3rem", padding: "1.25rem 1.5rem", display: "flex", flexWrap: "wrap", gap: "1rem", justifyContent: "center" }}>
+            {[
+              { href: "/apply", label: "Become a Vendor" },
+              { href: "/terms", label: "Terms" },
+              { href: "/privacy", label: "Privacy" },
+              { href: "/returns", label: "Returns" },
+              { href: "/prohibited-items", label: "Prohibited Items" },
+            ].map(({ href, label }) => (
+              <a key={href} href={href} style={{ fontSize: "0.75rem", color: "#475569", textDecoration: "none" }}>{label}</a>
+            ))}
+            <span style={{ fontSize: "0.75rem", color: "#334155" }}>© {new Date().getFullYear()} PeopleWeLike</span>
+          </footer>
         </AuthProvider>
       </body>
     </html>
