@@ -261,6 +261,49 @@ async function initDb() {
       payload jsonb NOT NULL DEFAULT '{}'::jsonb,
       created_at timestamptz NOT NULL DEFAULT now()
     );
+
+    CREATE TABLE IF NOT EXISTS vendor_applications (
+      id serial PRIMARY KEY,
+      business_name text NOT NULL,
+      contact_name text NOT NULL,
+      email text NOT NULL,
+      phone text,
+      description text,
+      category text,
+      status text NOT NULL DEFAULT 'pending',
+      notes text,
+      reviewed_by int REFERENCES users(id),
+      reviewed_at timestamptz,
+      created_at timestamptz NOT NULL DEFAULT now()
+    );
+
+    CREATE TABLE IF NOT EXISTS vendors (
+      id serial PRIMARY KEY,
+      user_id int NOT NULL REFERENCES users(id),
+      application_id int REFERENCES vendor_applications(id),
+      business_name text NOT NULL,
+      slug text UNIQUE NOT NULL,
+      description text,
+      category text,
+      logo_url text,
+      website text,
+      instagram text,
+      active boolean DEFAULT true,
+      created_at timestamptz NOT NULL DEFAULT now()
+    );
+
+    CREATE TABLE IF NOT EXISTS vendor_products (
+      id serial PRIMARY KEY,
+      vendor_id int NOT NULL REFERENCES vendors(id),
+      name text NOT NULL,
+      description text,
+      price int NOT NULL,
+      category text,
+      image_url text,
+      stock int,
+      active boolean DEFAULT true,
+      created_at timestamptz NOT NULL DEFAULT now()
+    );
   `);
 
   // Add idempotency_key column if missing (idempotent migration)
@@ -1576,6 +1619,219 @@ app.get("/stats", { preHandler: requireRole(ADMIN_ROLES) }, async () => {
     event_count: Number(events.rows[0].count),
     active_sessions: Number(sessions.rows[0].count),
   };
+});
+
+// ─── Vendor Applications (public) ────────────────────────────
+app.post("/apply", async (req, reply) => {
+  const { business_name, contact_name, email, phone, description, category } = req.body || {};
+  if (!business_name || !contact_name || !email) {
+    return reply.code(400).send({ error: "business_name, contact_name, and email are required" });
+  }
+  // Prevent duplicate pending applications from same email
+  const dup = await pool.query(
+    "SELECT id FROM vendor_applications WHERE email=$1 AND status='pending'",
+    [email]
+  );
+  if (dup.rowCount > 0) {
+    return reply.code(409).send({ error: "A pending application already exists for this email" });
+  }
+  const r = await pool.query(
+    `INSERT INTO vendor_applications (business_name, contact_name, email, phone, description, category)
+     VALUES ($1,$2,$3,$4,$5,$6) RETURNING id, created_at`,
+    [business_name, contact_name, email, phone || null, description || null, category || null]
+  );
+  return reply.code(201).send({ id: r.rows[0].id, submitted_at: r.rows[0].created_at });
+});
+
+// ─── Admin: Vendor Applications ──────────────────────────────
+app.get("/admin/vendor-applications", { preHandler: requireRole(ADMIN_ROLES) }, async (req) => {
+  const status = req.query.status || "pending";
+  const r = await pool.query(
+    `SELECT va.*, u.email as reviewer_email
+     FROM vendor_applications va
+     LEFT JOIN users u ON u.id = va.reviewed_by
+     WHERE ($1='all' OR va.status=$1)
+     ORDER BY va.created_at DESC`,
+    [status]
+  );
+  return r.rows;
+});
+
+app.put("/admin/vendor-applications/:id/approve", { preHandler: requireRole(ADMIN_ROLES) }, async (req, reply) => {
+  const appId = Number(req.params.id);
+  const { temp_password, notes } = req.body || {};
+  if (!temp_password) return reply.code(400).send({ error: "temp_password required" });
+
+  const appl = await pool.query("SELECT * FROM vendor_applications WHERE id=$1", [appId]);
+  if (appl.rowCount === 0) return reply.code(404).send({ error: "Application not found" });
+  const a = appl.rows[0];
+  if (a.status !== "pending") return reply.code(409).send({ error: `Application is already ${a.status}` });
+
+  return withTx(async (client) => {
+    // Mark application approved
+    await client.query(
+      "UPDATE vendor_applications SET status='approved', notes=$1, reviewed_by=$2, reviewed_at=now() WHERE id=$3",
+      [notes || null, req.user.uid, appId]
+    );
+
+    // Create vendor user (or reuse if email already exists)
+    let userId;
+    const existing = await client.query("SELECT id FROM users WHERE email=$1", [a.email]);
+    if (existing.rowCount > 0) {
+      userId = existing.rows[0].id;
+      const hash = await bcrypt.hash(temp_password, 10);
+      await client.query("UPDATE users SET role='VENDOR', password_hash=$1 WHERE id=$2", [hash, userId]);
+    } else {
+      const hash = await bcrypt.hash(temp_password, 10);
+      const u = await client.query(
+        "INSERT INTO users (email, password_hash, role) VALUES ($1,$2,'VENDOR') RETURNING id",
+        [a.email, hash]
+      );
+      userId = u.rows[0].id;
+    }
+
+    // Create vendor profile
+    const slug = a.business_name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
+    const existingSlug = await client.query("SELECT id FROM vendors WHERE slug=$1", [slug]);
+    const finalSlug = existingSlug.rowCount > 0 ? `${slug}-${appId}` : slug;
+
+    const v = await client.query(
+      `INSERT INTO vendors (user_id, application_id, business_name, slug, description, category)
+       VALUES ($1,$2,$3,$4,$5,$6) RETURNING id`,
+      [userId, appId, a.business_name, finalSlug, a.description || null, a.category || null]
+    );
+
+    return { vendor_id: v.rows[0].id, user_id: userId, slug: finalSlug };
+  });
+});
+
+app.put("/admin/vendor-applications/:id/reject", { preHandler: requireRole(ADMIN_ROLES) }, async (req, reply) => {
+  const appId = Number(req.params.id);
+  const { notes } = req.body || {};
+  const r = await pool.query(
+    "UPDATE vendor_applications SET status='rejected', notes=$1, reviewed_by=$2, reviewed_at=now() WHERE id=$3 AND status='pending' RETURNING id",
+    [notes || null, req.user.uid, appId]
+  );
+  if (r.rowCount === 0) return reply.code(404).send({ error: "Pending application not found" });
+  return { ok: true };
+});
+
+// ─── Admin: Vendors list ──────────────────────────────────────
+app.get("/admin/vendors", { preHandler: requireRole(ADMIN_ROLES) }, async () => {
+  const r = await pool.query(
+    `SELECT v.*, u.email,
+       (SELECT COUNT(*) FROM vendor_products WHERE vendor_id=v.id AND active=true) as product_count
+     FROM vendors v
+     JOIN users u ON u.id=v.user_id
+     ORDER BY v.created_at DESC`
+  );
+  return r.rows;
+});
+
+app.put("/admin/vendors/:id/toggle", { preHandler: requireRole(ADMIN_ROLES) }, async (req, reply) => {
+  const r = await pool.query(
+    "UPDATE vendors SET active=NOT active WHERE id=$1 RETURNING id, active",
+    [req.params.id]
+  );
+  if (r.rowCount === 0) return reply.code(404).send({ error: "Not found" });
+  return r.rows[0];
+});
+
+// ─── Vendor: Profile ──────────────────────────────────────────
+app.get("/vendor/profile", { preHandler: requireRole(["VENDOR"]) }, async (req, reply) => {
+  const r = await pool.query(
+    "SELECT * FROM vendors WHERE user_id=$1",
+    [req.user.uid]
+  );
+  if (r.rowCount === 0) return reply.code(404).send({ error: "Vendor profile not found" });
+  return r.rows[0];
+});
+
+app.put("/vendor/profile", { preHandler: requireRole(["VENDOR"]) }, async (req, reply) => {
+  const { description, logo_url, website, instagram } = req.body || {};
+  const r = await pool.query(
+    `UPDATE vendors SET description=$1, logo_url=$2, website=$3, instagram=$4
+     WHERE user_id=$5 RETURNING *`,
+    [description || null, logo_url || null, website || null, instagram || null, req.user.uid]
+  );
+  if (r.rowCount === 0) return reply.code(404).send({ error: "Vendor profile not found" });
+  return r.rows[0];
+});
+
+// ─── Vendor: Products ─────────────────────────────────────────
+app.get("/vendor/products", { preHandler: requireRole(["VENDOR"]) }, async (req) => {
+  const v = await pool.query("SELECT id FROM vendors WHERE user_id=$1", [req.user.uid]);
+  if (v.rowCount === 0) return [];
+  const r = await pool.query(
+    "SELECT * FROM vendor_products WHERE vendor_id=$1 ORDER BY created_at DESC",
+    [v.rows[0].id]
+  );
+  return r.rows;
+});
+
+app.post("/vendor/products", { preHandler: requireRole(["VENDOR"]) }, async (req, reply) => {
+  const v = await pool.query("SELECT id FROM vendors WHERE user_id=$1", [req.user.uid]);
+  if (v.rowCount === 0) return reply.code(403).send({ error: "No vendor profile" });
+  const { name, description, price, category, image_url, stock } = req.body || {};
+  if (!name || price == null) return reply.code(400).send({ error: "name and price required" });
+  const r = await pool.query(
+    `INSERT INTO vendor_products (vendor_id, name, description, price, category, image_url, stock)
+     VALUES ($1,$2,$3,$4,$5,$6,$7) RETURNING *`,
+    [v.rows[0].id, name, description || null, Number(price), category || null, image_url || null, stock != null ? Number(stock) : null]
+  );
+  return reply.code(201).send(r.rows[0]);
+});
+
+app.put("/vendor/products/:id", { preHandler: requireRole(["VENDOR"]) }, async (req, reply) => {
+  const v = await pool.query("SELECT id FROM vendors WHERE user_id=$1", [req.user.uid]);
+  if (v.rowCount === 0) return reply.code(403).send({ error: "No vendor profile" });
+  const { name, description, price, category, image_url, stock, active } = req.body || {};
+  const r = await pool.query(
+    `UPDATE vendor_products SET
+       name=COALESCE($1,name), description=COALESCE($2,description),
+       price=COALESCE($3,price), category=COALESCE($4,category),
+       image_url=COALESCE($5,image_url), stock=COALESCE($6,stock),
+       active=COALESCE($7,active)
+     WHERE id=$8 AND vendor_id=$9 RETURNING *`,
+    [name||null, description||null, price!=null?Number(price):null, category||null,
+     image_url||null, stock!=null?Number(stock):null, active!=null?active:null,
+     req.params.id, v.rows[0].id]
+  );
+  if (r.rowCount === 0) return reply.code(404).send({ error: "Not found" });
+  return r.rows[0];
+});
+
+app.delete("/vendor/products/:id", { preHandler: requireRole(["VENDOR"]) }, async (req, reply) => {
+  const v = await pool.query("SELECT id FROM vendors WHERE user_id=$1", [req.user.uid]);
+  if (v.rowCount === 0) return reply.code(403).send({ error: "No vendor profile" });
+  const r = await pool.query(
+    "DELETE FROM vendor_products WHERE id=$1 AND vendor_id=$2 RETURNING id",
+    [req.params.id, v.rows[0].id]
+  );
+  if (r.rowCount === 0) return reply.code(404).send({ error: "Not found" });
+  return { ok: true };
+});
+
+// ─── Public: Marketplace ─────────────────────────────────────
+app.get("/marketplace/vendors", async () => {
+  const r = await pool.query(
+    `SELECT v.id, v.business_name, v.slug, v.description, v.category, v.logo_url
+     FROM vendors v WHERE v.active=true ORDER BY v.created_at DESC`
+  );
+  return r.rows;
+});
+
+app.get("/marketplace/vendors/:slug", async (req, reply) => {
+  const v = await pool.query(
+    "SELECT v.id, v.business_name, v.slug, v.description, v.category, v.logo_url, v.website, v.instagram FROM vendors v WHERE v.slug=$1 AND v.active=true",
+    [req.params.slug]
+  );
+  if (v.rowCount === 0) return reply.code(404).send({ error: "Not found" });
+  const products = await pool.query(
+    "SELECT id, name, description, price, category, image_url, stock FROM vendor_products WHERE vendor_id=$1 AND active=true ORDER BY created_at DESC",
+    [v.rows[0].id]
+  );
+  return { ...v.rows[0], products: products.rows };
 });
 
 // ─── Start ───────────────────────────────────────────────────
